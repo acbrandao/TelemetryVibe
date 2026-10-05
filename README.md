@@ -1,6 +1,6 @@
 # TelemetryVibe
 
-A native desktop app (macOS first, Windows-ready) that adds animated GPS telemetry gauges to video.
+A **vibe-coded** (via Claude) native desktop app (macOS first, Windows-ready) that adds animated GPS telemetry gauges to video.
 The workflow is: drop a video and a FIT/GPX/TCX file, let it sync automatically, pick a template,
 arrange the gauges on the video, scrub to check, then render.
 
