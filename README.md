@@ -73,7 +73,7 @@ UNIVERSAL=1 scripts/bundle_macos.sh     # arm64 + x86_64 universal binary
 FFMPEG_DIR=/path/to/static scripts/bundle_macos.sh   # bundle a static ffmpeg/ffprobe in Resources
 ```
 
-On Windows, run `scripts\build_windows.ps1` (x64 by default, `-Target aarch64-pc-windows-msvc` for ARM64).
+On Windows, run `scripts\build_windows.ps1` (builds for this PC's architecture, x64 or ARM64; pass `-Target x86_64-pc-windows-msvc` or `-Target aarch64-pc-windows-msvc` to choose).
 To publish the built binaries as a GitHub Release tagged `v<version>` from `Cargo.toml`, run
 `scripts\publish_release.ps1` (add `-Build` to rebuild x64 and ARM64 first, `-Draft` to review before it goes live).
 

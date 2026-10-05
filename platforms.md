@@ -90,10 +90,11 @@ When it's done:
 dist\TelemetryVibe\TelemetryVibe-x64.exe    # or TelemetryVibe-arm64.exe for an ARM64 build
 ```
 
-To build for ARM64 (for example, Surface or Snapdragon laptops):
+It builds for your PC's architecture automatically, so ARM64 machines (for example, Surface or Snapdragon
+laptops) get `TelemetryVibe-arm64.exe`. To build for the other architecture, pass `-Target`:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 -Target aarch64-pc-windows-msvc
+powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 -Target x86_64-pc-windows-msvc
 ```
 
 If `winget` isn't found, install **App Installer** from the Microsoft Store and try again.

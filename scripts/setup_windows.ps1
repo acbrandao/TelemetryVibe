@@ -2,10 +2,16 @@
 # then builds dist\TelemetryVibe\TelemetryVibe-<x64|arm64>.exe. Safe to re-run; anything already installed is skipped.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
-#   powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 -Target aarch64-pc-windows-msvc
-param([string]$Target = "x86_64-pc-windows-msvc")
+#   powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 -Target x86_64-pc-windows-msvc
+# Builds for this machine's architecture (x64 or ARM64) unless -Target says otherwise.
+param([string]$Target)
 $ErrorActionPreference = "Stop"
 Set-Location (Join-Path $PSScriptRoot "..")
+if (-not $Target) {
+    # The registry holds the native OS architecture, even when PowerShell runs under x64 emulation on ARM64.
+    $native = (Get-ItemProperty "HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager\Environment").PROCESSOR_ARCHITECTURE
+    $Target = if ($native -eq "ARM64") { "aarch64-pc-windows-msvc" } else { "x86_64-pc-windows-msvc" }
+}
 
 if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
     Write-Error "winget not found. Install 'App Installer' from the Microsoft Store, then re-run."
