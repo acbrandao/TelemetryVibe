@@ -1,5 +1,8 @@
 # TelemetryVibe
 
+![TelemetryVibe editor with telemetry gauges on a cycling video](screenshots/editor.jpg)
+
+
 A **vibe-coded** (via Claude) native desktop app (macOS first, Windows-ready) that adds animated GPS telemetry gauges to video.
 The workflow is: drop a video and a FIT/GPX/TCX file, let it sync automatically, pick a template,
 arrange the gauges on the video, scrub to check, then render.
@@ -22,6 +25,29 @@ Prebuilt downloads are attached to [GitHub Releases](https://github.com/acbranda
 | macOS | Intel (x86_64) | Not yet available | Build with `UNIVERSAL=1 scripts/bundle_macos.sh` |
 | Windows | x64 / ARM64 | Not yet available | Build with `scripts\build_windows.ps1` |
 | Linux | x86_64 | Not yet available | See [platforms.md](platforms.md) |
+
+## Screenshots
+
+Click a thumbnail to open the full-size image.
+
+<table>
+  <tr>
+    <td align="center"><a href="screenshots/editor.jpg"><img src="screenshots/thumbs/editor.jpg" width="400" alt="Editor with gauges on the video"></a><br>Editor</td>
+    <td align="center"><a href="screenshots/editor-2.jpg"><img src="screenshots/thumbs/editor-2.jpg" width="400" alt="Editor during playback"></a><br>Live preview during playback</td>
+  </tr>
+  <tr>
+    <td align="center"><a href="screenshots/gauge-library-speed.jpg"><img src="screenshots/thumbs/gauge-library-speed.jpg" width="400" alt="Gauge Library with speed gauges"></a><br>Gauge Library: speed</td>
+    <td align="center"><a href="screenshots/gauge-library-heart-rate.jpg"><img src="screenshots/thumbs/gauge-library-heart-rate.jpg" width="400" alt="Gauge Library with heart-rate gauges"></a><br>Gauge Library: heart rate</td>
+  </tr>
+  <tr>
+    <td align="center"><a href="screenshots/render-settings.jpg"><img src="screenshots/thumbs/render-settings.jpg" width="400" alt="Render Video dialog"></a><br>Render settings</td>
+    <td align="center"><a href="screenshots/render-queue.jpg"><img src="screenshots/thumbs/render-queue.jpg" width="400" alt="Render queue with a render in progress"></a><br>Render queue</td>
+  </tr>
+  <tr>
+    <td align="center"><a href="screenshots/render-queue-2.jpg"><img src="screenshots/thumbs/render-queue-2.jpg" width="400" alt="Render queue with finished renders"></a><br>Render queue: finished jobs</td>
+    <td></td>
+  </tr>
+</table>
 
 ## Quick start
 
