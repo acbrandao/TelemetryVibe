@@ -7,6 +7,17 @@ arrange the gauges on the video, scrub to check, then render.
 Written in Rust: egui/eframe on **wgpu** for the UI, **tiny-skia** for vector gauge rendering,
 and **FFmpeg** (run as a subprocess) for probing, decoding, proxies and final encoding.
 
+## Binaries
+
+Prebuilt downloads are attached to [GitHub Releases](https://github.com/acbrandao/TelemetryVibe/releases).
+
+| Platform | Architecture | Download | Notes |
+|---|---|---|---|
+| macOS | Apple Silicon (arm64) | [TelemetryVibe-0.1.0-macos-arm64.zip](https://github.com/acbrandao/TelemetryVibe/releases/download/v0.1.0/TelemetryVibe-0.1.0-macos-arm64.zip) | Ad-hoc signed: right-click → **Open** the first time. Requires FFmpeg (`brew install ffmpeg`). |
+| macOS | Intel (x86_64) | Not yet available | Build with `UNIVERSAL=1 scripts/bundle_macos.sh` |
+| Windows | x64 / ARM64 | Not yet available | Build with `scripts\build_windows.ps1` |
+| Linux | x86_64 | Not yet available | See [platforms.md](platforms.md) |
+
 ## Quick start
 
 See [platforms.md](platforms.md) for one-command setup and build scripts for macOS, Windows and Linux.
