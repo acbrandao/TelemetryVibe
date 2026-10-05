@@ -6,7 +6,7 @@ You can run it again at any time: tools that are already installed are skipped.
 | Platform | One command | Result |
 |---|---|---|
 | macOS | `scripts/setup_macos.sh` | `dist/TelemetryVibe.app` |
-| Windows | `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1` | `dist\TelemetryVibe\telemetryvibe.exe` |
+| Windows | `powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1` | `dist\TelemetryVibe\TelemetryVibe-x64.exe` (or `-arm64.exe`) |
 | Linux | `scripts/setup_linux.sh` | `dist/TelemetryVibe/telemetryvibe` |
 
 Every platform needs the same three things:
@@ -87,7 +87,7 @@ Then it builds the app. Approve any Windows permission (UAC) prompts that appear
 When it's done:
 
 ```powershell
-dist\TelemetryVibe\telemetryvibe.exe
+dist\TelemetryVibe\TelemetryVibe-x64.exe    # or TelemetryVibe-arm64.exe for an ARM64 build
 ```
 
 To build for ARM64 (for example, Surface or Snapdragon laptops):
@@ -112,7 +112,7 @@ If `winget` isn't found, install **App Installer** from the Microsoft Store and 
 
 ### Shipping FFmpeg with the app
 
-Copy `ffmpeg.exe` and `ffprobe.exe` into `dist\TelemetryVibe\`, next to `telemetryvibe.exe`. The app uses
+Copy `ffmpeg.exe` and `ffprobe.exe` into `dist\TelemetryVibe\`, next to `TelemetryVibe-x64.exe` / `TelemetryVibe-arm64.exe`. The app uses
 them automatically, so the whole folder can be zipped and run on another PC.
 
 ---

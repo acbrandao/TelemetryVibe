@@ -1,5 +1,5 @@
 # One-shot Windows setup: installs the MSVC build tools, Rust and FFmpeg with winget,
-# then builds dist\TelemetryVibe\telemetryvibe.exe. Safe to re-run; anything already installed is skipped.
+# then builds dist\TelemetryVibe\TelemetryVibe-<x64|arm64>.exe. Safe to re-run; anything already installed is skipped.
 #
 #   powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1
 #   powershell -ExecutionPolicy Bypass -File scripts\setup_windows.ps1 -Target aarch64-pc-windows-msvc
@@ -41,4 +41,5 @@ rustup update stable
 Write-Host "==> Building TelemetryVibe..."
 & (Join-Path $PSScriptRoot "build_windows.ps1") -Target $Target
 Write-Host ""
-Write-Host "Done. Launch it with:  dist\TelemetryVibe\telemetryvibe.exe"
+$arch = if ($Target -like "aarch64*") { "arm64" } else { "x64" }
+Write-Host "Done. Launch it with:  dist\TelemetryVibe\TelemetryVibe-$arch.exe"
