@@ -7,7 +7,7 @@ arrange the gauges on the video, scrub to check, then render.
 Written in Rust: egui/eframe on **wgpu** for the UI, **tiny-skia** for vector gauge rendering,
 and **[FFmpeg](https://ffmpeg.org/)** (run as a subprocess) for probing, decoding, proxies and final encoding.
 
-FFmpeg reads almost any camera format (GoPro, DJI, iPhone HEVC, and others) and uses the computer's
+FFmpeg  was chosen for the video injestion and rendering because reads almost any camera format (GoPro, DJI, iPhone HEVC, and others) and uses the computer's
 hardware encoders (VideoToolbox, NVENC, QSV, AMF). It can overlay the gauges and encode the output in a
 single pass, so the original audio and quality are preserved. Running it as a separate process means the
 app doesn't need to bundle or link codec libraries, and you can switch to any FFmpeg build.
