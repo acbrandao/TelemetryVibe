@@ -332,6 +332,33 @@ fn gauge_editor(app: &mut GaugeApp, ui: &mut egui::Ui, g: &mut Gauge) {
                             g.zones.clear();
                         }
                         ui.end_row();
+                        if g.metric == Metric::Distance {
+                            prop_label(ui, "");
+                            let toggled = ui
+                                .checkbox(&mut g.distance_from_sync, "Start from sync point")
+                                .on_hover_text(
+                                    "Count distance from where the video starts on the GPS track \
+                                     (set by the sync offset) instead of from the start of the recording",
+                                )
+                                .changed();
+                            // Keep the range matching the distance the gauge can now show.
+                            if toggled && let Some(t) = track {
+                                let total = t.stats.get(Metric::Distance).map(|s| s.max);
+                                if let Some(total) = total {
+                                    let base = if g.distance_from_sync {
+                                        crate::gauges::sync_start_distance(
+                                            t,
+                                            &app.state.project.sync,
+                                        )
+                                    } else {
+                                        0.0
+                                    };
+                                    g.min = 0.0;
+                                    g.max = (total - base).max(1.0);
+                                }
+                            }
+                            ui.end_row();
+                        }
                         prop_label(ui, "Units");
                         egui::ComboBox::from_id_salt("units")
                             .selected_text(match g.units {

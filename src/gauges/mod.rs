@@ -157,7 +157,26 @@ pub fn gauge_value(g: &Gauge, ctx: &RenderCtx<'_>) -> Option<f64> {
     if g.metric == Metric::Custom {
         track.extra_value(&g.custom_key, t, g.smoothing)
     } else {
-        track.value_smoothed(g.metric, t, g.smoothing)
+        track
+            .value_smoothed(g.metric, t, g.smoothing)
+            .map(|v| relative_to_sync(g, ctx, v))
+    }
+}
+
+/// Track distance at the sync start point (GPS time of the first video frame), clamped to the
+/// recording.
+pub fn sync_start_distance(track: &Track, sync: &SyncSettings) -> f64 {
+    let t = sync.video_to_gps(0.0).clamp(0.0, track.duration());
+    track.value(Metric::Distance, t).unwrap_or(0.0)
+}
+
+/// Rebases a canonical value on the sync start point when the gauge asks for it.
+pub fn relative_to_sync(g: &Gauge, ctx: &RenderCtx<'_>, v: f64) -> f64 {
+    match ctx.track {
+        Some(track) if g.metric == Metric::Distance && g.distance_from_sync => {
+            (v - sync_start_distance(track, ctx.sync)).max(0.0)
+        }
+        _ => v,
     }
 }
 

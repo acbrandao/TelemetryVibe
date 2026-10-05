@@ -725,8 +725,20 @@ pub fn parse(bytes: &[u8], name: &str) -> Result<Track, FitError> {
                 }
             }
             mesg::SESSION => {
-                if let Some(sp) = msg.get(5) {
-                    builder.sport = Some(sport_name(sp as u8).to_string());
+                let sport = msg.get(5).map(|sp| sport_name(sp as u8).to_string());
+                if builder.sport.is_none() {
+                    builder.sport = sport.clone();
+                } else if sport.is_some() && builder.sport != sport {
+                    builder.sport = Some("Multisport".to_string());
+                }
+                let start = msg.get(2);
+                let end = msg.timestamp.map(|t| t as f64);
+                let elapsed = msg.get(7).map(|v| v / 1000.0);
+                if let Some(s) = start {
+                    let e = end.or(elapsed.map(|el| s + el)).unwrap_or(s);
+                    builder
+                        .sessions
+                        .push((s + FIT_EPOCH_OFFSET, e + FIT_EPOCH_OFFSET, sport));
                 }
             }
             mesg::FILE_ID => {

@@ -3,7 +3,10 @@
 
 use super::model::{FontWeight, Gauge};
 use super::scene::{self, Cap, HAlign, Paint, Scene, VAlign};
-use super::{RenderCtx, display_value, format_gauge_value, gauge_unit_label, gauge_value, panel};
+use super::{
+    RenderCtx, display_value, format_gauge_value, gauge_unit_label, gauge_value, panel,
+    relative_to_sync,
+};
 use crate::telemetry::Metric;
 
 #[derive(Clone, Copy, Debug)]
@@ -28,6 +31,7 @@ fn sample(g: &Gauge, ctx: &RenderCtx<'_>, t: f64) -> Option<f64> {
         } else {
             track.value(g.metric, t)
         }
+        .map(|v| relative_to_sync(g, ctx, v))
     }?;
     Some(display_value(g, ctx, v))
 }

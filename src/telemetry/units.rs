@@ -50,9 +50,9 @@ const MPH_PER_MS: f64 = 3600.0 / M_PER_MILE;
 /// Converts a canonical value to its display value.
 pub fn to_display(metric: Metric, si: f64, units: UnitSystem) -> f64 {
     match (metric, units) {
-        (Metric::Speed, UnitSystem::Metric) => si * KMH_PER_MS,
-        (Metric::Speed, UnitSystem::Imperial) => si * MPH_PER_MS,
-        (Metric::Altitude | Metric::GpsAltitude, UnitSystem::Imperial) => si / M_PER_FOOT,
+        (Metric::Speed | Metric::Vmg, UnitSystem::Metric) => si * KMH_PER_MS,
+        (Metric::Speed | Metric::Vmg, UnitSystem::Imperial) => si * MPH_PER_MS,
+        (Metric::Altitude | Metric::GpsAltitude | Metric::ElevationGain, UnitSystem::Imperial) => si / M_PER_FOOT,
         (Metric::Distance, UnitSystem::Metric) => si / 1000.0,
         (Metric::Distance, UnitSystem::Imperial) => si / M_PER_MILE,
         (Metric::Temperature, UnitSystem::Imperial) => si * 9.0 / 5.0 + 32.0,
@@ -66,9 +66,9 @@ pub fn to_display(metric: Metric, si: f64, units: UnitSystem) -> f64 {
 /// Converts a display value back to canonical.
 pub fn to_si(metric: Metric, display: f64, units: UnitSystem) -> f64 {
     match (metric, units) {
-        (Metric::Speed, UnitSystem::Metric) => display / KMH_PER_MS,
-        (Metric::Speed, UnitSystem::Imperial) => display / MPH_PER_MS,
-        (Metric::Altitude | Metric::GpsAltitude, UnitSystem::Imperial) => display * M_PER_FOOT,
+        (Metric::Speed | Metric::Vmg, UnitSystem::Metric) => display / KMH_PER_MS,
+        (Metric::Speed | Metric::Vmg, UnitSystem::Imperial) => display / MPH_PER_MS,
+        (Metric::Altitude | Metric::GpsAltitude | Metric::ElevationGain, UnitSystem::Imperial) => display * M_PER_FOOT,
         (Metric::Distance, UnitSystem::Metric) => display * 1000.0,
         (Metric::Distance, UnitSystem::Imperial) => display * M_PER_MILE,
         (Metric::Temperature, UnitSystem::Imperial) => (display - 32.0) * 5.0 / 9.0,
@@ -95,10 +95,10 @@ pub fn delta_to_display(metric: Metric, si: f64, units: UnitSystem) -> f64 {
 /// Unit label for display (`km/h`, `mph`, `ft`, ...).
 pub fn unit_label(metric: Metric, units: UnitSystem) -> &'static str {
     match (metric, units) {
-        (Metric::Speed, UnitSystem::Metric) => "km/h",
-        (Metric::Speed, UnitSystem::Imperial) => "mph",
-        (Metric::Altitude | Metric::GpsAltitude, UnitSystem::Metric) => "m",
-        (Metric::Altitude | Metric::GpsAltitude, UnitSystem::Imperial) => "ft",
+        (Metric::Speed | Metric::Vmg, UnitSystem::Metric) => "km/h",
+        (Metric::Speed | Metric::Vmg, UnitSystem::Imperial) => "mph",
+        (Metric::Altitude | Metric::GpsAltitude | Metric::ElevationGain, UnitSystem::Metric) => "m",
+        (Metric::Altitude | Metric::GpsAltitude | Metric::ElevationGain, UnitSystem::Imperial) => "ft",
         (Metric::Distance, UnitSystem::Metric) => "km",
         (Metric::Distance, UnitSystem::Imperial) => "mi",
         (Metric::Temperature, UnitSystem::Metric) => "°C",
@@ -112,6 +112,8 @@ pub fn unit_label(metric: Metric, units: UnitSystem) -> &'static str {
         (Metric::Power, _) => "W",
         (Metric::Grade, _) => "%",
         (Metric::Heading, _) => "°",
+        (Metric::GForce, _) => "g",
+        (Metric::LapDelta, _) => "s",
         (Metric::Latitude, _) | (Metric::Longitude, _) => "°",
         (Metric::Custom, _) => "",
     }
@@ -129,6 +131,10 @@ pub fn format_value(metric: Metric, display: f64, decimals: u8) -> String {
     }
     let decimals = decimals.min(6) as usize;
     let s = format!("{:.*}", decimals, display);
+    // Lap delta always shows its sign: + behind the best lap, - ahead of it.
+    if metric == Metric::LapDelta && !s.starts_with('-') {
+        return format!("+{}", group_thousands(&s));
+    }
     group_thousands(&s)
 }
 
@@ -199,5 +205,7 @@ mod tests {
         assert_eq!(format_value(Metric::Pace, 305.0, 0), "5:05");
         assert_eq!(format_value(Metric::Power, -1234567.0, 0), "-1,234,567");
         assert_eq!(format_value(Metric::Power, f64::NAN, 0), "--");
+        assert_eq!(format_value(Metric::LapDelta, 1.234, 2), "+1.23");
+        assert_eq!(format_value(Metric::LapDelta, -0.5, 2), "-0.50");
     }
 }

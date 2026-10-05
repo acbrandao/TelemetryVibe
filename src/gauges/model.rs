@@ -256,10 +256,12 @@ pub enum DialStyle {
     LedRing,
     /// Thick zone-colored value arc with a 10-second peak-hold marker.
     PeakArc,
+    /// Rotating compass card with a fixed lubber line; for heading.
+    Compass,
 }
 
 impl DialStyle {
-    pub const ALL: [DialStyle; 9] = [
+    pub const ALL: [DialStyle; 10] = [
         DialStyle::Automotive,
         DialStyle::Motorsport,
         DialStyle::Aviation,
@@ -269,6 +271,7 @@ impl DialStyle {
         DialStyle::ZoneArc,
         DialStyle::LedRing,
         DialStyle::PeakArc,
+        DialStyle::Compass,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -281,6 +284,7 @@ impl DialStyle {
             DialStyle::ZoneArc => "Zone arc",
             DialStyle::LedRing => "LED ring",
             DialStyle::PeakArc => "Peak hold arc",
+            DialStyle::Compass => "Compass",
         }
     }
 }
@@ -565,6 +569,10 @@ pub struct Gauge {
     /// Visual smoothing 0..=1.
     #[serde(default)]
     pub smoothing: f32,
+    /// Distance gauges: count from the sync start point (the GPS position at the start of the
+    /// video) instead of the start of the recording.
+    #[serde(default)]
+    pub distance_from_sync: bool,
     #[serde(default)]
     pub style: Style,
     #[serde(default)]

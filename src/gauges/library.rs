@@ -16,11 +16,16 @@ pub enum PresetId {
     SportSpeed,
     MotorsportSpeed,
     AviationSpeed,
+    DigitalVmg,
     DigitalPace,
     DigitalAltitude,
     AltitudeTape,
     ElevationGraph,
     DigitalGrade,
+    AviationAltitude,
+    VerticalSpeedDial,
+    DigitalVerticalSpeed,
+    DigitalElevationGain,
     AnalogHr,
     DigitalHr,
     HrBar,
@@ -46,6 +51,7 @@ pub enum PresetId {
     DigitalDistance,
     DistanceProgress,
     HeadingTape,
+    Compass,
     GradientTape,
     FullRouteMap,
     MovingRoute,
@@ -56,6 +62,8 @@ pub enum PresetId {
     ElapsedTime,
     RecordingTime,
     LapTime,
+    DigitalGForce,
+    DigitalLapDelta,
     TextLabel,
     ImageLogo,
 }
@@ -71,11 +79,16 @@ impl PresetId {
         PresetId::SportSpeed,
         PresetId::MotorsportSpeed,
         PresetId::AviationSpeed,
+        PresetId::DigitalVmg,
         PresetId::DigitalPace,
         PresetId::DigitalAltitude,
         PresetId::AltitudeTape,
         PresetId::ElevationGraph,
         PresetId::DigitalGrade,
+        PresetId::AviationAltitude,
+        PresetId::VerticalSpeedDial,
+        PresetId::DigitalVerticalSpeed,
+        PresetId::DigitalElevationGain,
         PresetId::AnalogHr,
         PresetId::DigitalHr,
         PresetId::HrBar,
@@ -101,6 +114,7 @@ impl PresetId {
         PresetId::DigitalDistance,
         PresetId::DistanceProgress,
         PresetId::HeadingTape,
+        PresetId::Compass,
         PresetId::GradientTape,
         PresetId::FullRouteMap,
         PresetId::MovingRoute,
@@ -111,6 +125,8 @@ impl PresetId {
         PresetId::ElapsedTime,
         PresetId::RecordingTime,
         PresetId::LapTime,
+        PresetId::DigitalGForce,
+        PresetId::DigitalLapDelta,
         PresetId::TextLabel,
         PresetId::ImageLogo,
     ];
@@ -126,6 +142,14 @@ impl PresetId {
             PresetId::SportSpeed => "Sport speed dial",
             PresetId::MotorsportSpeed => "Motorsport dial",
             PresetId::AviationSpeed => "Aviation dial",
+            PresetId::DigitalVmg => "Digital VMG",
+            PresetId::AviationAltitude => "Altimeter",
+            PresetId::VerticalSpeedDial => "Vertical speed indicator",
+            PresetId::DigitalVerticalSpeed => "Digital vertical speed",
+            PresetId::DigitalElevationGain => "Digital elevation gain",
+            PresetId::Compass => "Compass",
+            PresetId::DigitalGForce => "Digital G-force",
+            PresetId::DigitalLapDelta => "Lap delta",
             PresetId::DigitalPace => "Digital pace",
             PresetId::DigitalAltitude => "Digital altitude",
             PresetId::AltitudeTape => "Altitude tape",
@@ -178,7 +202,12 @@ impl PresetId {
             AnalogSpeed | DigitalSpeed | SpeedTape | SpeedBar | SpeedGraph | ModernSpeed
             | SportSpeed | MotorsportSpeed | AviationSpeed => Metric::Speed,
             DigitalPace => Metric::Pace,
-            DigitalAltitude | AltitudeTape | ElevationGraph => Metric::Altitude,
+            DigitalVmg => Metric::Vmg,
+            DigitalAltitude | AltitudeTape | ElevationGraph | AviationAltitude => Metric::Altitude,
+            VerticalSpeedDial | DigitalVerticalSpeed => Metric::VerticalSpeed,
+            DigitalElevationGain => Metric::ElevationGain,
+            DigitalGForce => Metric::GForce,
+            DigitalLapDelta => Metric::LapDelta,
             AnalogHr | DigitalHr | HrBar | HrZone | HrGraph | HrPulse | HrEkg | HrZoneDial
             | HrLedRing => Metric::HeartRate,
             DigitalCadence | CircularCadence | CadenceBar => Metric::Cadence,
@@ -186,7 +215,7 @@ impl PresetId {
             | PowerPeakDial | PowerSportDial => Metric::Power,
             DigitalTemperature | TemperatureBar => Metric::Temperature,
             DigitalDistance | DistanceProgress => Metric::Distance,
-            HeadingTape => Metric::Heading,
+            HeadingTape | Compass => Metric::Heading,
             GradientTape | DigitalGrade => Metric::Grade,
             FullRouteMap | MovingRoute | TrailMap | CloseUpMap => Metric::Latitude,
             _ => return None,
@@ -211,6 +240,7 @@ pub fn categories() -> Vec<(&'static str, Vec<PresetId>)> {
                 MotorsportSpeed,
                 AviationSpeed,
                 DigitalPace,
+                DigitalVmg,
             ],
         ),
         (
@@ -218,7 +248,11 @@ pub fn categories() -> Vec<(&'static str, Vec<PresetId>)> {
             vec![
                 DigitalAltitude,
                 AltitudeTape,
+                AviationAltitude,
                 ElevationGraph,
+                DigitalElevationGain,
+                VerticalSpeedDial,
+                DigitalVerticalSpeed,
                 GradientTape,
                 DigitalGrade,
             ],
@@ -247,8 +281,16 @@ pub fn categories() -> Vec<(&'static str, Vec<PresetId>)> {
         ("Distance", vec![DigitalDistance, DistanceProgress]),
         (
             "Route",
-            vec![FullRouteMap, MovingRoute, TrailMap, CloseUpMap, HeadingTape],
+            vec![
+                FullRouteMap,
+                MovingRoute,
+                TrailMap,
+                CloseUpMap,
+                Compass,
+                HeadingTape,
+            ],
         ),
+        ("Motorsport", vec![DigitalGForce, DigitalLapDelta]),
         (
             "Time",
             vec![Date, TimeOfDay, ElapsedTime, RecordingTime, LapTime],
@@ -353,6 +395,13 @@ pub fn default_range(metric: Metric, track: Option<&Track>, units: UnitSystem) -
             to_si(metric, 10.0 * 60.0, units),
         ),
         Metric::VerticalSpeed => (-2.0, 2.0),
+        Metric::ElevationGain => (
+            0.0,
+            nice_max(stats.map(|s| s.max).unwrap_or(f64::NAN), 500.0),
+        ),
+        Metric::Vmg => default_range(Metric::Speed, track, units),
+        Metric::GForce => (0.0, 2.0),
+        Metric::LapDelta => (-5.0, 5.0),
         _ => (0.0, stats.map(|s| nice_ceil(s.max)).unwrap_or(100.0)),
     }
 }
@@ -471,6 +520,7 @@ fn base(
         max: 100.0,
         units: UnitPref::Inherit,
         smoothing: 0.35,
+        distance_from_sync: false,
         style: Style {
             decimals: metric.default_decimals(),
             ..Style::default()
@@ -614,7 +664,7 @@ pub fn make_preset(
             dial_size,
             video,
         ),
-        AviationSpeed => base(
+        AviationSpeed | AviationAltitude | VerticalSpeedDial => base(
             id,
             name,
             analog(DialStyle::Aviation, 300.0),
@@ -623,8 +673,18 @@ pub fn make_preset(
             dial_size,
             video,
         ),
+        Compass => base(
+            id,
+            name,
+            analog(DialStyle::Compass, 360.0),
+            metric,
+            dial_size,
+            dial_size,
+            video,
+        ),
         DigitalSpeed | DigitalPace | DigitalAltitude | DigitalHr | DigitalCadence
-        | DigitalPower | DigitalTemperature | DigitalDistance => {
+        | DigitalPower | DigitalTemperature | DigitalDistance | DigitalVmg
+        | DigitalVerticalSpeed | DigitalElevationGain | DigitalGForce | DigitalLapDelta => {
             base(id, name, digital(), metric, dw, dh, video)
         }
         HrEkg => base(
@@ -902,6 +962,57 @@ pub fn make_preset(
             g.style.background = Rgba::rgb(5, 5, 5);
             g.style.background_opacity = 0.85;
         }
+        AviationAltitude => {
+            g.style.background = Rgba::rgb(5, 5, 5);
+            g.style.background_opacity = 0.85;
+        }
+        VerticalSpeedDial | DigitalVerticalSpeed => {
+            // Symmetric around zero so level flight points straight up.
+            let fallback = if units == UnitSystem::Metric {
+                300.0
+            } else {
+                1000.0
+            };
+            let peak = track
+                .and_then(|t| t.stats.get(Metric::VerticalSpeed))
+                .map(|s| s.min.abs().max(s.max.abs()))
+                .filter(|v| *v > 0.0)
+                .map(|v| nice_ceil(to_display(Metric::VerticalSpeed, v, units) * 1.1))
+                .unwrap_or(fallback);
+            let lim = to_si(Metric::VerticalSpeed, peak, units);
+            g.min = -lim;
+            g.max = lim;
+            if preset == VerticalSpeedDial {
+                g.style.background = Rgba::rgb(5, 5, 5);
+                g.style.background_opacity = 0.85;
+                // -limit, -limit/2, 0, +limit/2, +limit: round numbers for any nice limit.
+                if let GaugeKind::Analog { major_ticks, .. } = &mut g.kind {
+                    *major_ticks = 4;
+                }
+            }
+        }
+        DigitalVmg => {
+            // Negative while moving away from the destination.
+            g.min = -g.max;
+        }
+        DigitalLapDelta => {
+            // Green while ahead of the best lap, red while behind.
+            g.zones = vec![
+                Zone {
+                    from: -1.0e6,
+                    color: Rgba::rgb(70, 210, 110),
+                    label: "Ahead".into(),
+                },
+                Zone {
+                    from: 0.0,
+                    color: Rgba::rgb(240, 70, 60),
+                    label: "Behind".into(),
+                },
+            ];
+            g.zone_targets.number = true;
+            g.zone_targets.bar = false;
+            g.zone_targets.arc = false;
+        }
         ModernSpeed => {
             g.style.primary = Rgba::rgb(0, 210, 255);
             g.style.glow = 0.6;
@@ -995,25 +1106,34 @@ pub fn make_preset(
     }
     // Digital-style gauges (readouts, icon readouts, EKG, time) share one height and get a
     // width that fits their content, so their numbers come out the same size.
-    if matches!(
-        g.kind,
-        GaugeKind::Digital { .. } | GaugeKind::Ekg { .. } | GaugeKind::Time { .. }
-    ) {
-        g.placement.h = dh.round();
-        let sync = crate::telemetry::SyncSettings::default();
-        let ctx = super::RenderCtx {
-            track,
-            sync: &sync,
-            video_t: 0.0,
-            units,
-        };
-        if let Some(nw) = super::digital::natural_width(&g, &ctx) {
-            g.placement.w = nw;
-        }
+    if fit_digital_height(&mut g, dh, track, units) {
         g.placement.x = ((video.0 - g.placement.w) / 2.0).round();
         g.placement.y = ((video.1 - g.placement.h) / 2.0).round();
     }
     g
+}
+
+/// Gives a digital-style gauge (readout, icon readout, EKG, time) height `h` and the width its
+/// content needs at that height. Returns false, changing nothing, for other kinds.
+fn fit_digital_height(g: &mut Gauge, h: f32, track: Option<&Track>, units: UnitSystem) -> bool {
+    if !matches!(
+        g.kind,
+        GaugeKind::Digital { .. } | GaugeKind::Ekg { .. } | GaugeKind::Time { .. }
+    ) {
+        return false;
+    }
+    g.placement.h = h.round();
+    let sync = crate::telemetry::SyncSettings::default();
+    let ctx = super::RenderCtx {
+        track,
+        sync: &sync,
+        video_t: 0.0,
+        units,
+    };
+    if let Some(nw) = super::digital::natural_width(g, &ctx) {
+        g.placement.w = nw;
+    }
+    true
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1023,15 +1143,17 @@ pub enum Template {
     Sailing,
     Hiking,
     Motorsport,
+    Aviation,
 }
 
 impl Template {
-    pub const ALL: [Template; 5] = [
+    pub const ALL: [Template; 6] = [
         Template::Cycling,
         Template::Running,
         Template::Sailing,
         Template::Hiking,
         Template::Motorsport,
+        Template::Aviation,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -1040,17 +1162,145 @@ impl Template {
             Template::Sailing => "Sailing",
             Template::Hiking => "Hiking",
             Template::Motorsport => "Motorsport",
+            Template::Aviation => "Aviation",
         }
     }
     pub fn description(self) -> &'static str {
         match self {
-            Template::Cycling => "Speed, cadence, power, heart rate, map",
-            Template::Running => "Pace, heart rate, distance, route",
-            Template::Sailing => "Speed, heading, distance, route",
-            Template::Hiking => "Altitude, distance, heart rate, route",
-            Template::Motorsport => "Speed, RPM, track, lap time",
+            Template::Cycling => {
+                "Speedometer, distance, power, heart rate, cadence, route map, elevation profile"
+            }
+            Template::Running => {
+                "Pace, distance, power, heart rate, cadence, grade, route map, elevation profile"
+            }
+            Template::Sailing => "Speed, compass, VMG, distance, GPS track",
+            Template::Hiking => {
+                "Compass, distance, speed, elevation gain, grade, route map, elevation profile"
+            }
+            Template::Motorsport => {
+                "RPM, speed, gear, throttle/brake, G-force, lap delta, track map"
+            }
+            Template::Aviation => "Airspeed, altitude, vertical speed, heading, route map",
         }
     }
+}
+
+/// Shared template geometry. Everything is sized from one unit — the height of the largest
+/// 16:9 frame that fits the video — so gauges match across templates and fit any aspect.
+/// Gauges hug the edges: readout column top-left, map top-right, dials along the bottom-left
+/// and the elevation profile bottom-right, leaving the middle of the frame clear.
+struct Layout<'a> {
+    video: (f32, f32),
+    track: Option<&'a Track>,
+    units: UnitSystem,
+    /// Margin to the video edge.
+    m: f32,
+    /// Space between neighboring gauges.
+    gap: f32,
+    dial: f32,
+    tile_h: f32,
+    map: f32,
+    profile: (f32, f32),
+}
+
+impl<'a> Layout<'a> {
+    fn new(video: (f32, f32), track: Option<&'a Track>, units: UnitSystem) -> Self {
+        let u = video.1.min(video.0 * 9.0 / 16.0).max(100.0);
+        Self {
+            video,
+            track,
+            units,
+            m: u * 0.035,
+            gap: u * 0.018,
+            dial: u * 0.22,
+            tile_h: u * 0.085,
+            map: u * 0.26,
+            profile: (u * 0.5, u * 0.15),
+        }
+    }
+
+    /// A preset at its template size: dials square, readouts one height, maps and graphs fixed.
+    fn gauge(&self, p: PresetId, id: GaugeId) -> Gauge {
+        let mut g = make_preset(p, id, self.video, self.track, self.units);
+        if !fit_digital_height(&mut g, self.tile_h, self.track, self.units) {
+            let (w, h) = match g.kind {
+                GaugeKind::Analog { .. } => (self.dial, self.dial),
+                GaugeKind::Map { .. } => (self.map, self.map),
+                GaugeKind::Graph { .. } => self.profile,
+                _ => (g.placement.w, g.placement.h),
+            };
+            g.placement.w = w.round();
+            g.placement.h = h.round();
+        }
+        g
+    }
+
+    /// Readouts stacked down the top-left edge, all as wide as the widest one.
+    fn left_column(&self, mut gauges: Vec<Gauge>, out: &mut Vec<Gauge>) {
+        let w = gauges.iter().map(|g| g.placement.w).fold(0.0, f32::max);
+        let mut y = self.m;
+        for g in &mut gauges {
+            g.placement.w = w.round();
+            g.placement.x = self.m.round();
+            g.placement.y = y.round();
+            y += g.placement.h + self.gap;
+        }
+        out.extend(gauges);
+    }
+
+    /// Gauges in a row along the bottom-left edge, bottoms aligned.
+    fn bottom_row(&self, mut gauges: Vec<Gauge>, out: &mut Vec<Gauge>) {
+        let mut x = self.m;
+        for g in &mut gauges {
+            g.placement.x = x.round();
+            g.placement.y = (self.video.1 - self.m - g.placement.h).round();
+            x += g.placement.w + self.gap;
+        }
+        out.extend(gauges);
+    }
+
+    fn top_right(&self, mut g: Gauge, out: &mut Vec<Gauge>) {
+        g.placement.x = (self.video.0 - self.m - g.placement.w).round();
+        g.placement.y = self.m.round();
+        out.push(g);
+    }
+
+    fn bottom_right(&self, mut g: Gauge, out: &mut Vec<Gauge>) {
+        g.placement.x = (self.video.0 - self.m - g.placement.w).round();
+        g.placement.y = (self.video.1 - self.m - g.placement.h).round();
+        out.push(g);
+    }
+}
+
+/// Matches a dial's look to the rest of its template.
+fn restyle_dial(g: &mut Gauge, style: DialStyle) {
+    if let GaugeKind::Analog { dial, sweep, .. } = &mut g.kind {
+        *dial = style;
+        *sweep = match style {
+            DialStyle::Aviation => 300.0,
+            DialStyle::Motorsport => 240.0,
+            DialStyle::Compass => 360.0,
+            _ => 270.0,
+        };
+    }
+}
+
+/// Black instrument face shared by the aviation and marine dials.
+fn instrument_face(g: &mut Gauge) {
+    g.style.background = Rgba::rgb(5, 5, 5);
+    g.style.background_opacity = 0.85;
+}
+
+/// Binds a gauge to a non-standard field from car data loggers (shows "--" when absent).
+fn bind_custom(g: &mut Gauge, key: &str, label: &str, min: f64, max: f64) {
+    g.name = label.to_string();
+    g.metric = Metric::Custom;
+    g.custom_key = key.into();
+    g.min = min;
+    g.max = max;
+    g.zones.clear();
+    g.style.label = label.to_uppercase();
+    g.style.decimals = 0;
 }
 
 /// Instantiates a template. `next_id` is called for every new gauge.
@@ -1062,87 +1312,125 @@ pub fn apply_template(
     next_id: &mut dyn FnMut() -> GaugeId,
 ) -> Vec<Gauge> {
     use PresetId::*;
-    let (vw, vh) = video;
-    let m = vh * 0.035;
+    let lay = Layout::new(video, track, units);
     let mut out = Vec::new();
-    let mut add = |p: PresetId, x: f32, y: f32, out: &mut Vec<Gauge>| {
-        let mut g = make_preset(p, next_id(), video, track, units);
-        g.placement.x = x.round();
-        g.placement.y = y.round();
-        out.push(g);
-    };
-    // Helpers to read the preset sizes.
-    let size = |p: PresetId| {
-        let g = make_preset(p, GaugeId(0), video, track, units);
-        (g.placement.w, g.placement.h)
-    };
+    let mut make = |p: PresetId| lay.gauge(p, next_id());
     match t {
         Template::Cycling => {
-            let (dw, dh) = size(AnalogSpeed);
-            add(AnalogSpeed, m, vh - dh - m, &mut out);
-            let (rw, rh) = size(DigitalPower);
-            let x = m * 2.0 + dw;
-            add(DigitalPower, x, vh - m - rh * 3.0 - m, &mut out);
-            add(DigitalCadence, x, vh - m - rh * 2.0 - m / 2.0, &mut out);
-            add(DigitalHr, x, vh - m - rh, &mut out);
-            let _ = rw;
-            let (mw, _) = size(FullRouteMap);
-            add(FullRouteMap, vw - mw - m, m, &mut out);
-            let (gw, gh) = size(ElevationGraph);
-            add(ElevationGraph, vw - gw - m, vh - gh - m, &mut out);
+            let mut speed = make(SportSpeed);
+            speed.name = "Speedometer".into();
+            let power = make(PowerSportDial);
+            lay.bottom_row(vec![speed, power], &mut out);
+            lay.left_column(
+                vec![make(DigitalDistance), make(HrPulse), make(DigitalCadence)],
+                &mut out,
+            );
+            lay.top_right(make(FullRouteMap), &mut out);
+            lay.bottom_right(make(ElevationGraph), &mut out);
         }
         Template::Running => {
-            let (_, rh) = size(DigitalPace);
-            add(DigitalPace, m, vh - m - rh * 3.0 - m, &mut out);
-            add(DigitalHr, m, vh - m - rh * 2.0 - m / 2.0, &mut out);
-            add(DigitalDistance, m, vh - m - rh, &mut out);
-            let (mw, _) = size(TrailMap);
-            add(TrailMap, vw - mw - m, m, &mut out);
-            let (zw, zh) = size(HrZone);
-            add(HrZone, vw - zw - m, vh - zh - m, &mut out);
+            let power = make(PowerSportDial);
+            let mut cadence = make(CircularCadence);
+            restyle_dial(&mut cadence, DialStyle::Sport);
+            lay.bottom_row(vec![power, cadence], &mut out);
+            lay.left_column(
+                vec![
+                    make(DigitalPace),
+                    make(DigitalDistance),
+                    make(HrPulse),
+                    make(DigitalGrade),
+                ],
+                &mut out,
+            );
+            lay.top_right(make(FullRouteMap), &mut out);
+            lay.bottom_right(make(ElevationGraph), &mut out);
         }
         Template::Sailing => {
-            let (dw, dh) = size(AviationSpeed);
-            add(AviationSpeed, m, vh - dh - m, &mut out);
-            let (hw, _) = size(HeadingTape);
-            add(HeadingTape, (vw - hw) / 2.0, m, &mut out);
-            let (_, rh) = size(DigitalDistance);
-            add(DigitalDistance, m * 2.0 + dw, vh - rh - m, &mut out);
-            let (mw, _) = size(FullRouteMap);
-            add(FullRouteMap, vw - mw - m, m, &mut out);
+            let speed = make(AviationSpeed);
+            let mut compass = make(Compass);
+            instrument_face(&mut compass);
+            lay.bottom_row(vec![speed, compass], &mut out);
+            lay.left_column(vec![make(DigitalVmg), make(DigitalDistance)], &mut out);
+            let mut track_map = make(FullRouteMap);
+            track_map.name = "GPS track".into();
+            lay.top_right(track_map, &mut out);
         }
         Template::Hiking => {
-            let (_, rh) = size(DigitalAltitude);
-            add(DigitalAltitude, m, vh - m - rh * 3.0 - m, &mut out);
-            add(DigitalDistance, m, vh - m - rh * 2.0 - m / 2.0, &mut out);
-            add(DigitalHr, m, vh - m - rh, &mut out);
-            let (gw, gh) = size(ElevationGraph);
-            add(ElevationGraph, vw - gw - m, vh - gh - m, &mut out);
-            let (mw, _) = size(FullRouteMap);
-            add(FullRouteMap, vw - mw - m, m, &mut out);
+            lay.bottom_row(vec![make(Compass)], &mut out);
+            lay.left_column(
+                vec![
+                    make(DigitalDistance),
+                    make(DigitalSpeed),
+                    make(DigitalElevationGain),
+                    make(DigitalGrade),
+                ],
+                &mut out,
+            );
+            lay.top_right(make(FullRouteMap), &mut out);
+            lay.bottom_right(make(ElevationGraph), &mut out);
         }
         Template::Motorsport => {
-            let (dw, dh) = size(MotorsportSpeed);
-            add(MotorsportSpeed, m, vh - dh - m, &mut out);
-            // RPM from a custom telemetry field (shows "--" if absent).
-            add(MotorsportSpeed, m * 2.0 + dw, vh - dh - m, &mut out);
-            if let Some(rpm) = out.last_mut() {
-                rpm.name = "RPM".into();
-                rpm.metric = Metric::Custom;
-                rpm.custom_key = "rpm".into();
-                rpm.min = 0.0;
-                rpm.max = 10000.0;
-                rpm.zones = vec![Zone {
-                    from: 8500.0,
-                    color: Rgba::rgb(235, 40, 40),
-                    label: "Redline".into(),
-                }];
-                rpm.style.label = "RPM".into();
-            }
-            let (mw, _) = size(FullRouteMap);
-            add(FullRouteMap, vw - mw - m, m, &mut out);
-            let (lw, lh) = size(LapTime);
-            add(LapTime, vw - lw - m, vh - lh - m, &mut out);
+            // RPM, gear, throttle and brake come from car data loggers, as custom fields.
+            let mut rpm = make(MotorsportSpeed);
+            bind_custom(&mut rpm, "rpm", "RPM", 0.0, 10000.0);
+            rpm.zones = vec![Zone {
+                from: 8500.0,
+                color: Rgba::rgb(235, 40, 40),
+                label: "Redline".into(),
+            }];
+            let speed = make(MotorsportSpeed);
+            let pedal = |mut g: Gauge, key: &str, label: &str, color: Rgba| {
+                bind_custom(&mut g, key, label, 0.0, 100.0);
+                g.kind = GaugeKind::Bar {
+                    orientation: Orientation::Vertical,
+                    segments: 0,
+                    rounded: true,
+                    thickness: 0.6,
+                    show_value: false,
+                };
+                g.style.primary = color;
+                g.placement.w = (lay.dial * 0.34).round();
+                g.placement.h = lay.dial.round();
+                g
+            };
+            let throttle = pedal(
+                make(CadenceBar),
+                "throttle",
+                "Throttle",
+                Rgba::rgb(70, 210, 110),
+            );
+            let brake = pedal(make(CadenceBar), "brake", "Brake", Rgba::rgb(240, 60, 50));
+            lay.bottom_row(vec![rpm, speed, throttle, brake], &mut out);
+
+            let mut gear = make(DigitalCadence);
+            bind_custom(&mut gear, "gear", "Gear", 0.0, 8.0);
+            gear.style.primary = Rgba::WHITE;
+            gear.style.show_units = false;
+            fit_digital_height(&mut gear, lay.tile_h, track, units);
+            lay.left_column(
+                vec![make(DigitalLapDelta), gear, make(DigitalGForce)],
+                &mut out,
+            );
+            let mut track_map = make(FullRouteMap);
+            track_map.name = "Track map".into();
+            lay.top_right(track_map, &mut out);
+        }
+        Template::Aviation => {
+            let mut airspeed = make(AviationSpeed);
+            airspeed.name = "Airspeed".into();
+            airspeed.style.label = "AIRSPEED".into();
+            let mut heading = make(Compass);
+            instrument_face(&mut heading);
+            lay.bottom_row(
+                vec![
+                    airspeed,
+                    make(AviationAltitude),
+                    make(VerticalSpeedDial),
+                    heading,
+                ],
+                &mut out,
+            );
+            lay.top_right(make(FullRouteMap), &mut out);
         }
     }
     out
@@ -1159,17 +1447,50 @@ mod tests {
             n += 1;
             GaugeId(n)
         };
+        for (vw, vh) in [(1920.0, 1080.0), (1080.0, 1920.0), (1440.0, 1080.0)] {
+            for t in Template::ALL {
+                let gauges = apply_template(t, (vw, vh), None, UnitSystem::Metric, &mut next);
+                assert!(gauges.len() >= 4, "{t:?}");
+                for g in &gauges {
+                    let p = g.placement;
+                    assert!(p.x >= 0.0 && p.y >= 0.0, "{t:?} {vw}x{vh} {}", g.name);
+                    assert!(
+                        p.x + p.w <= vw + 0.5 && p.y + p.h <= vh + 0.5,
+                        "{t:?} {vw}x{vh} {}",
+                        g.name
+                    );
+                }
+                // No gauge covers another.
+                for (i, a) in gauges.iter().enumerate() {
+                    for b in &gauges[i + 1..] {
+                        let (p, q) = (a.placement, b.placement);
+                        let overlap = p.x < q.x + q.w
+                            && q.x < p.x + p.w
+                            && p.y < q.y + q.h
+                            && q.y < p.y + p.h;
+                        assert!(!overlap, "{t:?} {vw}x{vh}: {} overlaps {}", a.name, b.name);
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn templates_keep_the_center_clear() {
+        let mut n = 0;
+        let mut next = || {
+            n += 1;
+            GaugeId(n)
+        };
+        let (vw, vh) = (1920.0, 1080.0);
         for t in Template::ALL {
-            let gauges = apply_template(t, (1920.0, 1080.0), None, UnitSystem::Metric, &mut next);
-            assert!(gauges.len() >= 4, "{t:?}");
-            for g in &gauges {
+            for g in apply_template(t, (vw, vh), None, UnitSystem::Metric, &mut next) {
                 let p = g.placement;
-                assert!(p.x >= 0.0 && p.y >= 0.0, "{t:?} {}", g.name);
-                assert!(
-                    p.x + p.w <= 1920.5 && p.y + p.h <= 1080.5,
-                    "{t:?} {}",
-                    g.name
-                );
+                let covers_center = p.x < vw * 0.6
+                    && p.x + p.w > vw * 0.4
+                    && p.y < vh * 0.6
+                    && p.y + p.h > vh * 0.4;
+                assert!(!covers_center, "{t:?} {}", g.name);
             }
         }
     }

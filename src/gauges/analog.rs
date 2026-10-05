@@ -104,7 +104,9 @@ fn look(d: DialStyle) -> Look {
             needle_width: 0.0,
         },
         // Drawn by their own builders below.
-        DialStyle::ZoneArc | DialStyle::LedRing | DialStyle::PeakArc => look(DialStyle::Minimal),
+        DialStyle::ZoneArc | DialStyle::LedRing | DialStyle::PeakArc | DialStyle::Compass => {
+            look(DialStyle::Minimal)
+        }
     }
 }
 
@@ -122,6 +124,7 @@ pub fn build(
         DialStyle::ZoneArc => return build_zone_arc(g, ctx),
         DialStyle::LedRing => return build_led_ring(g, ctx),
         DialStyle::PeakArc => return build_peak_arc(g, ctx, major_ticks),
+        DialStyle::Compass => return build_compass(g, ctx),
         _ => {}
     }
     let mut s = Scene::new();
@@ -735,6 +738,127 @@ fn build_led_ring(g: &Gauge, ctx: &RenderCtx<'_>) -> Scene {
         }
     }
     center_readout(&mut s, g, ctx, &d, value, zc, zone_name(g, value));
+    s
+}
+
+/// Eight-point compass direction for a heading in degrees.
+fn cardinal(heading: f64) -> &'static str {
+    const NAMES: [&str; 8] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+    NAMES[((heading.rem_euclid(360.0) + 22.5) / 45.0) as usize % 8]
+}
+
+/// Heading indicator: a compass card that turns so the current heading sits under the fixed
+/// lubber mark at the top, with the heading and its cardinal direction in the middle.
+fn build_compass(g: &Gauge, ctx: &RenderCtx<'_>) -> Scene {
+    let mut s = Scene::new();
+    let st = &g.style;
+    let fs = st.font_scale.max(0.1);
+    let d = Dial::new(g);
+    let (cx, cy, r) = (d.cx, d.cy, d.r);
+    let value = gauge_value(g, ctx);
+    dial_face(&mut s, g, &d, None);
+    s.stroke(
+        scene::circle(cx, cy, r * 0.985),
+        st.secondary,
+        r * 0.03,
+        Cap::Butt,
+    );
+
+    // Screen angle of a bearing on the card: the heading points straight up (270°).
+    let heading = value.map(|v| v as f32).unwrap_or(0.0);
+    let at = |bearing: f32| 270.0 + bearing - heading;
+    if st.show_ticks {
+        let outer = r * 0.93;
+        for i in 0..72 {
+            let b = i as f32 * 5.0;
+            let (len, width, col) = if i % 6 == 0 {
+                (0.14, 0.022, st.secondary.with_alpha(255))
+            } else if i % 2 == 0 {
+                (0.09, 0.014, st.secondary)
+            } else {
+                (0.05, 0.01, st.secondary)
+            };
+            let (x0, y0) = scene::polar(cx, cy, outer, at(b));
+            let (x1, y1) = scene::polar(cx, cy, outer - r * len, at(b));
+            s.stroke(scene::line(x0, y0, x1, y1), col, r * width, Cap::Butt);
+        }
+    }
+    // Card labels every 30°: letters at the cardinal points, tens of degrees elsewhere.
+    for i in 0..12 {
+        let b = i as f32 * 30.0;
+        let (text, size, color) = match i {
+            0 => ("N".to_string(), 0.16, st.accent),
+            3 => ("E".to_string(), 0.16, st.text),
+            6 => ("S".to_string(), 0.16, st.text),
+            9 => ("W".to_string(), 0.16, st.text),
+            _ => ((i * 3).to_string(), 0.11, st.secondary.with_alpha(230)),
+        };
+        let (lx, ly) = scene::polar(cx, cy, r * 0.64, at(b));
+        s.text(
+            text,
+            lx,
+            ly,
+            r * size * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            color,
+        );
+    }
+
+    // Fixed lubber mark at the top.
+    let tip = (cx, cy - r * 0.8);
+    s.glow_fill(
+        scene::polygon(&[
+            tip,
+            (cx - r * 0.07, cy - r * 0.97),
+            (cx + r * 0.07, cy - r * 0.97),
+        ]),
+        st.primary,
+        st.glow,
+        r * 0.04,
+    );
+
+    // Center readout: heading in degrees and its cardinal direction.
+    if st.show_label {
+        s.text(
+            g.label(),
+            cx,
+            cy - r * 0.27,
+            r * 0.09 * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            st.secondary,
+        );
+    }
+    let unit = if st.show_units {
+        gauge_unit_label(g, ctx)
+    } else {
+        ""
+    };
+    s.text(
+        format!("{}{unit}", format_gauge_value(g, ctx, value)),
+        cx,
+        cy,
+        r * 0.30 * fs,
+        st.font_weight,
+        HAlign::Center,
+        VAlign::Middle,
+        st.text,
+    );
+    if let Some(v) = value {
+        s.text(
+            cardinal(v),
+            cx,
+            cy + r * 0.27,
+            r * 0.12 * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            st.primary,
+        );
+    }
     s
 }
 

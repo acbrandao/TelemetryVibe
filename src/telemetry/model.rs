@@ -30,6 +30,14 @@ pub enum Metric {
     Heading,
     Grade,
     VerticalSpeed,
+    /// Cumulative climbing since the start (m), derived from altitude.
+    ElevationGain,
+    /// Velocity made good toward the end of the recording (m/s), derived from GPS.
+    Vmg,
+    /// Combined lateral + longitudinal acceleration (g), derived from GPS speed and heading.
+    GForce,
+    /// Seconds behind (+) or ahead of (-) the fastest lap at the same distance into the lap.
+    LapDelta,
     Latitude,
     Longitude,
     /// A non-standard field, identified by the gauge's `custom_key`.
@@ -37,7 +45,7 @@ pub enum Metric {
 }
 
 impl Metric {
-    pub const BUILTIN: [Metric; 14] = [
+    pub const BUILTIN: [Metric; 18] = [
         Metric::Speed,
         Metric::Pace,
         Metric::GpsAltitude,
@@ -50,6 +58,10 @@ impl Metric {
         Metric::Heading,
         Metric::Grade,
         Metric::VerticalSpeed,
+        Metric::ElevationGain,
+        Metric::Vmg,
+        Metric::GForce,
+        Metric::LapDelta,
         Metric::Latitude,
         Metric::Longitude,
     ];
@@ -68,6 +80,10 @@ impl Metric {
             Metric::Heading => "Heading",
             Metric::Grade => "Gradient",
             Metric::VerticalSpeed => "Vertical Speed",
+            Metric::ElevationGain => "Elevation Gain",
+            Metric::Vmg => "VMG",
+            Metric::GForce => "G-Force",
+            Metric::LapDelta => "Lap Delta",
             Metric::Latitude => "Latitude",
             Metric::Longitude => "Longitude",
             Metric::Custom => "Custom",
@@ -88,6 +104,10 @@ impl Metric {
             Metric::Heading => "HEADING",
             Metric::Grade => "GRADE",
             Metric::VerticalSpeed => "VERT SPEED",
+            Metric::ElevationGain => "ELEV GAIN",
+            Metric::Vmg => "VMG",
+            Metric::GForce => "G-FORCE",
+            Metric::LapDelta => "LAP DELTA",
             Metric::Latitude => "LAT",
             Metric::Longitude => "LON",
             Metric::Custom => "",
@@ -106,7 +126,10 @@ impl Metric {
     /// Default number of decimals for display.
     pub fn default_decimals(self) -> u8 {
         match self {
-            Metric::Speed | Metric::Distance | Metric::Grade | Metric::Temperature => 1,
+            Metric::Speed | Metric::Vmg | Metric::Distance | Metric::Grade | Metric::Temperature => {
+                1
+            }
+            Metric::GForce | Metric::LapDelta => 2,
             Metric::Latitude | Metric::Longitude => 5,
             _ => 0,
         }
@@ -163,6 +186,15 @@ pub struct Lap {
     pub distance: Option<f64>,
 }
 
+/// One sport segment of a recording (several in a multi-sport activity such as a triathlon).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Session {
+    /// Seconds from track start.
+    pub start: f64,
+    pub end: f64,
+    pub sport: Option<String>,
+}
+
 /// An automatically detected moment useful for visual synchronization.
 #[derive(Clone, Debug)]
 pub struct DetectedEvent {
@@ -176,6 +208,8 @@ pub enum EventKind {
     Stop,
     MaxSpeed,
     LapStart,
+    /// Start of a new sport segment in a multi-sport activity.
+    SportStart,
 }
 
 impl EventKind {
@@ -185,6 +219,7 @@ impl EventKind {
             EventKind::Stop => "Stops",
             EventKind::MaxSpeed => "Max speed",
             EventKind::LapStart => "Lap start",
+            EventKind::SportStart => "Sport change",
         }
     }
 }
@@ -275,6 +310,8 @@ pub struct Track {
     channels: BTreeMap<Metric, Vec<f64>>,
     pub extra: BTreeMap<String, Vec<f64>>,
     pub laps: Vec<Lap>,
+    /// Sport segments; empty unless the file records sessions.
+    pub sessions: Vec<Session>,
     pub stats: TrackStats,
     pub route: Option<Route>,
     pub events: Vec<DetectedEvent>,
@@ -410,6 +447,8 @@ pub struct TrackBuilder {
     pub samples: Vec<RawSample>,
     /// Laps in absolute Unix seconds (start, end, distance).
     pub laps: Vec<(f64, f64, Option<f64>)>,
+    /// Sport segments in absolute Unix seconds (start, end, sport).
+    pub sessions: Vec<(f64, f64, Option<String>)>,
     pub sport: Option<String>,
     pub device: Option<String>,
 }
@@ -421,6 +460,7 @@ impl TrackBuilder {
             format: format.into(),
             samples: Vec::new(),
             laps: Vec::new(),
+            sessions: Vec::new(),
             sport: None,
             device: None,
         }
@@ -483,7 +523,7 @@ impl TrackBuilder {
 
         derive_channels(&times, &mut channels, &mut extra);
 
-        let laps = self
+        let laps: Vec<Lap> = self
             .laps
             .iter()
             .map(|&(s, e, d)| Lap {
@@ -492,6 +532,26 @@ impl TrackBuilder {
                 distance: d,
             })
             .collect();
+        let mut sessions: Vec<Session> = self
+            .sessions
+            .iter()
+            .map(|(s, e, sport)| Session {
+                start: s - start,
+                end: e - start,
+                sport: sport.clone(),
+            })
+            .collect();
+        sessions.sort_by(|a, b| {
+            a.start
+                .partial_cmp(&b.start)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        if let Some(delta) = channels
+            .get(&Metric::Distance)
+            .and_then(|dist| derive_lap_delta(&times, dist, &laps))
+        {
+            channels.insert(Metric::LapDelta, delta);
+        }
 
         let mut track = Track {
             name: self.name,
@@ -501,6 +561,7 @@ impl TrackBuilder {
             channels,
             extra,
             laps,
+            sessions,
             stats: TrackStats::default(),
             route: None,
             events: Vec::new(),
@@ -751,6 +812,17 @@ fn derive_channels(
         if vs.iter().any(|v| !v.is_nan()) {
             channels.insert(Metric::VerticalSpeed, vs);
         }
+        let (gain, _) = climb_series(alt, climb_hysteresis(extra));
+        if gain.iter().any(|v| !v.is_nan()) {
+            channels.insert(Metric::ElevationGain, gain);
+        }
+    }
+
+    if let Some(vmg) = derive_vmg(channels) {
+        channels.insert(Metric::Vmg, vmg);
+    }
+    if let Some(g) = derive_g_force(times, channels) {
+        channels.insert(Metric::GForce, g);
     }
 
     // Cumulative heart beats (trapezoidal integral of bpm / 60). The fractional part is the
@@ -785,6 +857,161 @@ fn derive_channels(
             channels.insert(Metric::Pace, pace);
         }
     }
+}
+
+/// Hysteresis (m) for counting climbing: GPS altitude jitters more than barometric altitude.
+fn climb_hysteresis(extra: &BTreeMap<String, Vec<f64>>) -> f64 {
+    if extra.contains_key(GPS_ALTITUDE_TREND) {
+        3.0
+    } else {
+        1.0
+    }
+}
+
+/// Cumulative elevation gain at every sample (NaN before the first altitude) and the total
+/// loss. Changes smaller than `hysteresis` are treated as noise, not climbing.
+fn climb_series(alt: &[f64], hysteresis: f64) -> (Vec<f64>, f64) {
+    let mut gain_series = vec![f64::NAN; alt.len()];
+    let (mut gain, mut loss) = (0.0, 0.0);
+    let mut reference: Option<f64> = None;
+    for (i, &a) in alt.iter().enumerate() {
+        if !a.is_nan() {
+            match reference {
+                None => reference = Some(a),
+                Some(r) => {
+                    if a - r >= hysteresis {
+                        gain += a - r;
+                        reference = Some(a);
+                    } else if r - a >= hysteresis {
+                        loss += r - a;
+                        reference = Some(a);
+                    }
+                }
+            }
+        }
+        if reference.is_some() {
+            gain_series[i] = gain;
+        }
+    }
+    (gain_series, loss)
+}
+
+/// Velocity made good toward the last recorded position: speed × cos(course − bearing).
+fn derive_vmg(channels: &BTreeMap<Metric, Vec<f64>>) -> Option<Vec<f64>> {
+    let lat = channels.get(&Metric::Latitude)?;
+    let lon = channels.get(&Metric::Longitude)?;
+    let speed = channels.get(&Metric::Speed)?;
+    let heading = channels.get(&Metric::Heading)?;
+    let end = (0..lat.len())
+        .rev()
+        .find(|&i| !lat[i].is_nan() && !lon[i].is_nan())?;
+    let (elat, elon) = (lat[end], lon[end]);
+    let vmg: Vec<f64> = (0..lat.len())
+        .map(|i| {
+            let (la, lo, v, h) = (lat[i], lon[i], speed[i], heading[i]);
+            if la.is_nan() || lo.is_nan() || v.is_nan() || h.is_nan() {
+                return f64::NAN;
+            }
+            // Within a few meters of the destination the bearing is meaningless.
+            if haversine(la, lo, elat, elon) < 10.0 {
+                return f64::NAN;
+            }
+            v * (h - bearing(la, lo, elat, elon)).to_radians().cos()
+        })
+        .collect();
+    vmg.iter().any(|v| !v.is_nan()).then_some(vmg)
+}
+
+/// Combined acceleration in g: longitudinal from the change in speed, lateral from speed ×
+/// turn rate. Centered differences over ±1 s, then lightly smoothed against GPS jitter.
+fn derive_g_force(times: &[f64], channels: &BTreeMap<Metric, Vec<f64>>) -> Option<Vec<f64>> {
+    const G: f64 = 9.80665;
+    let speed = channels.get(&Metric::Speed)?;
+    let heading = channels.get(&Metric::Heading)?;
+    let n = times.len();
+    let mut g = vec![f64::NAN; n];
+    let (mut lo, mut hi) = (0usize, 0usize);
+    for i in 0..n {
+        while lo < i && times[i] - times[lo] > 1.0 {
+            lo += 1;
+        }
+        hi = hi.max(i);
+        while hi + 1 < n && times[hi + 1] - times[i] <= 1.0 {
+            hi += 1;
+        }
+        let (a, b) = (lo, hi);
+        let dt = times[b] - times[a];
+        if dt < 0.5 || [speed[a], speed[b], heading[a], heading[b], speed[i]]
+            .iter()
+            .any(|v| v.is_nan())
+        {
+            continue;
+        }
+        let long = (speed[b] - speed[a]) / dt;
+        // Shortest signed turn between the two headings.
+        let turn = ((heading[b] - heading[a] + 540.0) % 360.0 - 180.0).to_radians();
+        let lat = speed[i] * turn / dt;
+        g[i] = ((long * long + lat * lat).sqrt() / G).min(5.0);
+    }
+    let g = smoothing::gaussian_smooth(times, &g, 1.0);
+    g.iter().any(|v| !v.is_nan()).then_some(g)
+}
+
+/// Time gained or lost against the fastest complete lap, compared at equal distance into the
+/// lap. Needs at least two laps and a distance channel.
+fn derive_lap_delta(times: &[f64], dist: &[f64], laps: &[Lap]) -> Option<Vec<f64>> {
+    if laps.len() < 2 {
+        return None;
+    }
+    let dist_at = |t: f64| sample_channel(times, dist, t, InterpKind::Linear);
+    // Fastest lap that covers some distance.
+    let best = laps
+        .iter()
+        .filter(|l| l.end - l.start > 10.0)
+        .filter(|l| matches!((dist_at(l.start), dist_at(l.end)), (Some(a), Some(b)) if b - a > 50.0))
+        .min_by(|a, b| {
+            (a.end - a.start)
+                .partial_cmp(&(b.end - b.start))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })?;
+    let d0 = dist_at(best.start)?;
+    // (distance into lap, time into lap) along the best lap, distance non-decreasing.
+    let mut profile: Vec<(f64, f64)> = vec![(0.0, 0.0)];
+    for (i, &t) in times.iter().enumerate() {
+        if t <= best.start || t > best.end || dist[i].is_nan() {
+            continue;
+        }
+        let d = dist[i] - d0;
+        if d >= profile.last().map_or(0.0, |p| p.0) {
+            profile.push((d, t - best.start));
+        }
+    }
+    let best_time_at = |d: f64| -> Option<f64> {
+        let k = profile.partition_point(|p| p.0 < d);
+        if k == 0 {
+            return Some(0.0);
+        }
+        let (d1, t1) = *profile.get(k)?;
+        let (d0, t0) = profile[k - 1];
+        Some(if d1 > d0 {
+            t0 + (t1 - t0) * (d - d0) / (d1 - d0)
+        } else {
+            t1
+        })
+    };
+    let mut delta = vec![f64::NAN; times.len()];
+    for (i, &t) in times.iter().enumerate() {
+        let Some(lap) = laps.iter().rev().find(|l| t >= l.start && t <= l.end) else {
+            continue;
+        };
+        let (Some(start_d), false) = (dist_at(lap.start), dist[i].is_nan()) else {
+            continue;
+        };
+        if let Some(bt) = best_time_at(dist[i] - start_d) {
+            delta[i] = (t - lap.start) - bt;
+        }
+    }
+    delta.iter().any(|v| !v.is_nan()).then_some(delta)
 }
 
 fn channel_stats(values: &[f64]) -> Option<ChannelStats> {
@@ -854,27 +1081,8 @@ fn compute_stats(track: &Track) -> TrackStats {
         None => (track.channel(Metric::Altitude), 1.0),
     };
     if let Some(alt) = climb {
-        // Hysteresis avoids counting noise as climbing.
-        let (mut gain, mut loss) = (0.0, 0.0);
-        let mut reference: Option<f64> = None;
-        for &a in alt {
-            if a.is_nan() {
-                continue;
-            }
-            match reference {
-                None => reference = Some(a),
-                Some(r) => {
-                    if a - r >= hysteresis {
-                        gain += a - r;
-                        reference = Some(a);
-                    } else if r - a >= hysteresis {
-                        loss += r - a;
-                        reference = Some(a);
-                    }
-                }
-            }
-        }
-        stats.elevation_gain = Some(gain);
+        let (gain, loss) = climb_series(alt, hysteresis);
+        stats.elevation_gain = Some(gain.iter().rev().copied().find(|v| !v.is_nan()).unwrap_or(0.0));
         stats.elevation_loss = Some(loss);
     }
     if let Some(d) = track.channel(Metric::Distance) {
@@ -983,6 +1191,12 @@ fn detect_events(track: &Track) -> Vec<DetectedEvent> {
             kind: EventKind::LapStart,
         });
     }
+    for s in track.sessions.iter().skip(1) {
+        events.push(DetectedEvent {
+            t: s.start,
+            kind: EventKind::SportStart,
+        });
+    }
     events.sort_by(|a, b| a.t.partial_cmp(&b.t).unwrap_or(std::cmp::Ordering::Equal));
     events
 }
@@ -1021,6 +1235,53 @@ mod tests {
         assert!(!(1.0..=359.0).contains(&h), "heading {h}");
         let d = t.stats.total_distance.unwrap();
         assert!((d - 59.0 * 11.12).abs() < 5.0, "distance {d}");
+    }
+
+    #[test]
+    fn derives_gain_vmg_and_g_force() {
+        // Straight north at constant speed, climbing 1 m per sample.
+        let t = line_track(60);
+        let gain = t.value(Metric::ElevationGain, 59.0).unwrap();
+        assert!((gain - t.stats.elevation_gain.unwrap()).abs() < 1e-9);
+        assert!(gain > 40.0, "gain {gain}");
+        assert!(t.value(Metric::ElevationGain, 10.0).unwrap() < gain);
+        // Heading straight for the finish: VMG equals speed.
+        let (vmg, speed) = (
+            t.value(Metric::Vmg, 20.0).unwrap(),
+            t.value(Metric::Speed, 20.0).unwrap(),
+        );
+        assert!((vmg - speed).abs() < 0.2, "vmg {vmg} speed {speed}");
+        // No turning and no speed change: almost no acceleration.
+        let g = t.value(Metric::GForce, 30.0).unwrap();
+        assert!(g < 0.05, "g {g}");
+    }
+
+    #[test]
+    fn lap_delta_against_the_best_lap() {
+        // Two 100 s laps covering the same 500 m; the second is slower in its first half.
+        let mut b = TrackBuilder::new("laps", "test");
+        let t0 = 1_700_000_000.0;
+        for i in 0..=200 {
+            let s = i as f64;
+            let dist = if i <= 100 {
+                s * 5.0
+            } else {
+                let k = s - 100.0;
+                500.0 + if k <= 50.0 { k * 4.0 } else { 200.0 + (k - 50.0) * 6.0 }
+            };
+            b.samples.push(RawSample {
+                time: t0 + s,
+                distance: Some(dist),
+                ..Default::default()
+            });
+        }
+        b.laps.push((t0, t0 + 100.0, Some(500.0)));
+        b.laps.push((t0 + 100.0, t0 + 200.0, Some(500.0)));
+        let t = b.build().unwrap();
+        assert_eq!(t.value(Metric::LapDelta, 50.0), Some(0.0));
+        // 200 m into lap 2 took 50 s; the best lap got there in 40 s.
+        let d = t.value(Metric::LapDelta, 150.0).unwrap();
+        assert!((d - 10.0).abs() < 0.01, "delta {d}");
     }
 
     #[test]
