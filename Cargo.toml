@@ -1,0 +1,45 @@
+[package]
+name = "telemetryvibe"
+version = "0.1.0"
+edition = "2024"
+description = "GPS telemetry gauge overlays for video"
+license = "MIT"
+default-run = "telemetryvibe"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "telemetryvibe"
+path = "src/main.rs"
+
+[dependencies]
+ab_glyph = "0.2.32"
+anyhow = "1.0.104"
+chrono = { version = "0.4.45", features = ["serde"] }
+crossbeam-channel = "0.5.17"
+directories = "6.0.0"
+eframe = { version = "0.36.2", default-features = false, features = ["wgpu", "default_fonts", "accesskit", "wayland", "x11"] }
+egui = "0.36.2"
+parking_lot = "0.12.5"
+quick-xml = "0.42.0"
+rayon = "1.12.0"
+rfd = "0.17.2"
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = { version = "1.0.151", features = ["float_roundtrip"] }
+thiserror = "2.0.21"
+tiny-skia = "0.12.0"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+
+[profile.dev]
+opt-level = 1
+
+# Video, rasterization and font code is far too slow unoptimized; keep deps fast in dev.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+lto = "thin"
+strip = true
