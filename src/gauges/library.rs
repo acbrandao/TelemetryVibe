@@ -1208,7 +1208,7 @@ impl Template {
     pub fn description(self) -> &'static str {
         match self {
             Template::Cycling => {
-                "Speedometer with power zones, heart rate, cadence, distance and grade; elevation profile, route map"
+                "Speedometer over a bottom row of power, distance, grade, cadence and heart rate; elevation profile, close-up map"
             }
             Template::Running => {
                 "Large pace with heart-rate zones and distance; cadence, elevation, grade, split; elevation profile, route map"
@@ -1247,7 +1247,7 @@ impl Template {
             Template::Cycling => Skin {
                 panel: Rgba::rgb(12, 14, 18),
                 opacity: 0.5,
-                radius: 0.16,
+                radius: 0.12,
                 label: Rgba::rgba(255, 255, 255, 165),
                 accent: Rgba::rgb(255, 106, 61),
             },
@@ -1484,43 +1484,65 @@ pub fn apply_template(
     let bottom = lay.bottom();
     let mut out = Vec::new();
     match t {
-        // Bottom-left: a dominant speedometer with power, heart rate, cadence, distance and
-        // grade stacked beside it; elevation profile along the rest of the bottom; small map.
+        // Hugging the frame edges: one row of readouts across the bottom (power, distance,
+        // grade, cadence, heart rate) ending in a taller elevation profile, the speedometer
+        // sitting on the row's left end, and a close-up moving map top-right.
         Template::Cycling => {
-            let d = 0.27 * u;
-            let row_h = (d - 2.0 * gap) / 3.0 / u;
+            let m = 0.012 * u;
+            let (right, bottom) = (video.0 - m, video.1 - m);
+            let tile_h = 0.088;
+            let (gw, gh) = (0.42 * u, 0.123 * u);
+            let mut profile = lay.sized(ElevationGraph, next_id(), gw, gh);
+            if let GaugeKind::Graph {
+                grid, line_width, ..
+            } = &mut profile.kind
+            {
+                *grid = false;
+                *line_width = (u * 0.0022).max(1.5);
+            }
+            profile.style.label = "ELEVATION".into();
+            profile.style.font_scale = 1.25;
+            profile.move_to(right - gw, bottom - gh);
+
+            let mut row = [
+                lay.readout(DigitalPower, next_id(), tile_h),
+                lay.readout(DigitalDistance, next_id(), tile_h),
+                lay.readout(DigitalGrade, next_id(), tile_h),
+                lay.readout(DigitalCadence, next_id(), tile_h),
+                lay.readout(HrPulse, next_id(), tile_h),
+            ];
+            // Readouts share the space left of the profile, wide gaps between them when the
+            // frame has room for it.
+            let avail = profile.placement.x - 2.0 * gap - m;
+            let natural = row_width(&row, 0.0);
+            let row_gap = ((avail - natural) / 4.0).clamp(gap, 0.025 * u);
+            spread(&mut row, avail, row_gap);
+            let row_top = bottom - tile_h * u;
+            row_at(&mut row, m, row_top, row_gap);
+
+            let d = 0.26 * u;
             let mut speed = lay.sized(SportSpeed, next_id(), d, d);
             speed.name = "Speedometer".into();
-            let mut power = lay.readout(PowerZone, next_id(), row_h);
-            zone_bar(&mut power, 24);
-            power.name = "Power".into();
-            let mut mid = [
-                lay.readout(HrPulse, next_id(), row_h),
-                lay.readout(DigitalCadence, next_id(), row_h),
-            ];
-            let mut low = [
-                lay.readout(DigitalDistance, next_id(), row_h),
-                lay.readout(DigitalGrade, next_id(), row_h),
-            ];
-            let col_w = row_width(&mid, gap).max(row_width(&low, gap)).max(0.34 * u);
-            spread(&mut mid, col_w, gap);
-            spread(&mut low, col_w, gap);
-            power.placement.h = row_h * u;
-            power.placement.w = col_w;
+            speed.move_to(m, row_top - gap - d);
 
-            let top = bottom - d;
-            let x1 = m + d + gap;
-            speed.move_to(m, top);
-            power.move_to(x1, top);
-            row_at(&mut mid, x1, top + row_h * u + gap, gap);
-            row_at(&mut low, x1, top + 2.0 * (row_h * u + gap), gap);
-            out.extend([speed, power]);
-            out.extend(mid);
-            out.extend(low);
-            out.push(lay.profile(next_id(), x1 + col_w + 3.0 * gap));
-            let mut map = lay.dial(FullRouteMap, next_id(), 0.22);
-            lay.top_right(&mut map);
-            out.push(map);
+            let mut map = lay.dial(CloseUpMap, next_id(), 0.22);
+            if let GaugeKind::Map {
+                speed_colors,
+                heading_up,
+                ..
+            } = &mut map.kind
+            {
+                *speed_colors = false;
+                *heading_up = false;
+            }
+            map.zones.clear();
+            map.style.background_opacity = 0.35;
+            map.style.primary = lay.skin.accent;
+            map.move_to(right - map.placement.w, 2.0 * m);
+
+            out.push(speed);
+            out.extend(row);
+            out.extend([profile, map]);
         }
         // Bottom-left: big pace with heart-rate zones and distance right beside it, a row of
         // secondary readouts above; elevation profile along the bottom; small map.
