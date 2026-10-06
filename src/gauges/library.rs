@@ -1211,19 +1211,19 @@ impl Template {
                 "Speedometer over a bottom row of power, distance, grade, cadence and heart rate; elevation profile, close-up map"
             }
             Template::Running => {
-                "Large pace with heart-rate zones and distance; cadence, elevation, grade, split; elevation profile, route map"
+                "EKG heart rate over a bottom row of pace, distance, elapsed time, grade, altitude and cadence; elevation profile, close-up map"
             }
             Template::Sailing => {
-                "Speed dial, compass and wind rose with VMG, heel and distance; GPS track"
+                "Left-edge column of GPS track, VMG, heel, distance, speed dial, wind rose and compass; heading tape"
             }
             Template::Hiking => {
                 "Large elevation and distance; elevation gain, grade, vertical speed, speed; compass, elevation profile"
             }
             Template::Motorsport => {
-                "Tachometer, gear and speed with throttle/brake bars and G-force; lap time and delta, track map"
+                "Speedometer and tachometer with throttle, brake, gear, G-force and heart rate; track map, lap time and delta"
             }
             Template::Aviation => {
-                "HUD: airspeed, altitude and vertical-speed tapes, heading tape, artificial horizon, ground speed, GPS route"
+                "HUD: speed, altitude and vertical-speed tapes, ground speed, artificial horizon; altitude profile, heading tape, GPS route"
             }
         }
     }
@@ -1254,7 +1254,7 @@ impl Template {
             Template::Running => Skin {
                 panel: Rgba::rgb(10, 14, 20),
                 opacity: 0.5,
-                radius: 0.22,
+                radius: 0.12,
                 label: Rgba::rgba(200, 255, 120, 190),
                 accent: Rgba::rgb(170, 240, 60),
             },
@@ -1310,6 +1310,16 @@ fn apply_skin(g: &mut Gauge, skin: &Skin) {
     }
     st.secondary = skin.label;
 }
+
+/// Bottom edge of the edge strip templates.
+fn bottom_e(lay: &Layout<'_>) -> f32 {
+    lay.video.1 - lay.edge()
+}
+
+/// Readout height (in units) of the edge strip templates.
+const STRIP_TILE: f32 = 0.088;
+/// Taller readouts of the motorsport dash, a third of its speedometer.
+const DASH_TILE: f32 = 0.11;
 
 /// Shared template geometry. Everything is sized from one unit `u` — the height of the largest
 /// 16:9 frame that fits the video — so a template scales with the resolution and keeps its
@@ -1370,9 +1380,10 @@ impl<'a> Layout<'a> {
         g
     }
 
-    /// Refits a readout to height `h` pixels (after its binding or style changed).
-    fn fit(&self, g: &mut Gauge, h: f32) {
-        fit_digital_height(g, h, self.track, self.units);
+    /// Refits a readout to height `h` pixels (after its binding or style changed). False,
+    /// changing nothing, for gauges that are not readouts.
+    fn fit(&self, g: &mut Gauge, h: f32) -> bool {
+        fit_digital_height(g, h, self.track, self.units)
     }
 
     /// Full-activity elevation profile filling the bottom edge from `x` to the right margin.
@@ -1389,6 +1400,99 @@ impl<'a> Layout<'a> {
         g.style.label = "ELEVATION".into();
         g.style.font_scale = 1.5;
         g.move_to(x, self.bottom() - h);
+        g
+    }
+
+    /// Margin of the edge-hugging strip templates (cycling, running).
+    fn edge(&self) -> f32 {
+        0.012 * self.u
+    }
+
+    /// Elevation profile `w` units wide in the bottom-right corner of an edge strip, taller
+    /// than its tiles.
+    fn edge_profile(&self, id: GaugeId, w: f32) -> Gauge {
+        let (w, h) = (w * self.u, 0.123 * self.u);
+        let mut g = self.sized(PresetId::ElevationGraph, id, w, h);
+        if let GaugeKind::Graph {
+            grid, line_width, ..
+        } = &mut g.kind
+        {
+            *grid = false;
+            *line_width = (self.u * 0.0022).max(1.5);
+        }
+        g.style.label = "ELEVATION".into();
+        g.style.font_scale = 1.25;
+        let e = self.edge();
+        g.move_to(self.video.0 - e - w, self.video.1 - e - h);
+        g
+    }
+
+    /// Lays tiles `tile_h` units tall (as created) in one bottom-aligned row between `x0` and
+    /// `limit`, with one gap between
+    /// every neighbor (and before `limit` when `fill`ing up to a profile there). With `fill`
+    /// the tiles widen and the gaps open up (to a limit) to span the space; otherwise they keep
+    /// their natural width. When the tiles do not fit they all shrink to one smaller height.
+    /// Tiles are never narrower than tall. Returns the row top, the gap and the tile height,
+    /// for gauges stacked above.
+    fn strip(
+        &self,
+        row: &mut [Gauge],
+        tile_h: f32,
+        x0: f32,
+        limit: f32,
+        fill: bool,
+    ) -> (f32, f32, f32) {
+        let e = self.edge();
+        let n = row.len() as f32;
+        let avail = limit - x0;
+        let mut h = tile_h * self.u;
+        let natural = row_width(row, 0.0);
+        if natural + n * self.gap > avail {
+            // Tile widths are proportional to their height.
+            let k = (avail - n * self.gap) / natural;
+            h *= k;
+            for g in row.iter_mut() {
+                if !self.fit(g, h) {
+                    g.placement.w *= k;
+                    g.placement.h = h;
+                }
+            }
+        }
+        for g in row.iter_mut() {
+            g.placement.w = g.placement.w.max(h);
+        }
+        let natural = row_width(row, 0.0);
+        let gap = if fill {
+            ((avail - natural) / n).clamp(self.gap, 0.025 * self.u)
+        } else {
+            self.gap
+        };
+        if fill {
+            spread(row, avail - gap, gap);
+        }
+        let top = self.video.1 - e - h;
+        row_at(row, x0, top, gap);
+        (top, gap, h)
+    }
+
+    /// Close-up, north-up moving map with a scale bar in the top-right corner of an edge strip
+    /// template, on a lighter panel.
+    fn edge_map(&self, id: GaugeId, size: f32) -> Gauge {
+        let mut g = self.dial(PresetId::CloseUpMap, id, size);
+        if let GaugeKind::Map {
+            speed_colors,
+            heading_up,
+            ..
+        } = &mut g.kind
+        {
+            *speed_colors = false;
+            *heading_up = false;
+        }
+        g.zones.clear();
+        g.style.background_opacity = 0.35;
+        g.style.primary = Rgba::rgb(255, 106, 61);
+        let e = self.edge();
+        g.move_to(self.video.0 - e - g.placement.w, 2.0 * e);
         g
     }
 
@@ -1445,19 +1549,6 @@ fn widest(gs: &[Gauge]) -> f32 {
     gs.iter().map(|g| g.placement.w).fold(0.0, f32::max)
 }
 
-/// Turns a zone-coded gauge into a compact segmented bar (label, value, zone-colored blocks).
-fn zone_bar(g: &mut Gauge, segments: u32) {
-    g.kind = GaugeKind::Bar {
-        orientation: Orientation::Horizontal,
-        segments,
-        rounded: false,
-        thickness: 0.62,
-        show_value: true,
-    };
-    g.zone_targets.bar = true;
-    g.zone_targets.number = false;
-}
-
 /// Binds a gauge to a non-standard field from data loggers (shows "--" when absent).
 fn bind_custom(g: &mut Gauge, key: &str, label: &str, min: f64, max: f64) {
     g.name = label.to_string();
@@ -1488,142 +1579,100 @@ pub fn apply_template(
         // grade, cadence, heart rate) ending in a taller elevation profile, the speedometer
         // sitting on the row's left end, and a close-up moving map top-right.
         Template::Cycling => {
-            let m = 0.012 * u;
-            let (right, bottom) = (video.0 - m, video.1 - m);
-            let tile_h = 0.088;
-            let (gw, gh) = (0.42 * u, 0.123 * u);
-            let mut profile = lay.sized(ElevationGraph, next_id(), gw, gh);
-            if let GaugeKind::Graph {
-                grid, line_width, ..
-            } = &mut profile.kind
-            {
-                *grid = false;
-                *line_width = (u * 0.0022).max(1.5);
-            }
-            profile.style.label = "ELEVATION".into();
-            profile.style.font_scale = 1.25;
-            profile.move_to(right - gw, bottom - gh);
-
+            let profile = lay.edge_profile(next_id(), 0.42);
             let mut row = [
-                lay.readout(DigitalPower, next_id(), tile_h),
-                lay.readout(DigitalDistance, next_id(), tile_h),
-                lay.readout(DigitalGrade, next_id(), tile_h),
-                lay.readout(DigitalCadence, next_id(), tile_h),
-                lay.readout(HrPulse, next_id(), tile_h),
+                lay.readout(DigitalPower, next_id(), STRIP_TILE),
+                lay.readout(DigitalDistance, next_id(), STRIP_TILE),
+                lay.readout(DigitalGrade, next_id(), STRIP_TILE),
+                lay.readout(DigitalCadence, next_id(), STRIP_TILE),
+                lay.readout(HrPulse, next_id(), STRIP_TILE),
             ];
-            // Readouts share the space left of the profile, wide gaps between them when the
-            // frame has room for it.
-            let avail = profile.placement.x - 2.0 * gap - m;
-            let natural = row_width(&row, 0.0);
-            let row_gap = ((avail - natural) / 4.0).clamp(gap, 0.025 * u);
-            spread(&mut row, avail, row_gap);
-            let row_top = bottom - tile_h * u;
-            row_at(&mut row, m, row_top, row_gap);
-
+            let (row_top, strip_gap, _) =
+                lay.strip(&mut row, STRIP_TILE, lay.edge(), profile.placement.x, true);
             let d = 0.26 * u;
             let mut speed = lay.sized(SportSpeed, next_id(), d, d);
             speed.name = "Speedometer".into();
-            speed.move_to(m, row_top - gap - d);
-
-            let mut map = lay.dial(CloseUpMap, next_id(), 0.22);
-            if let GaugeKind::Map {
-                speed_colors,
-                heading_up,
-                ..
-            } = &mut map.kind
-            {
-                *speed_colors = false;
-                *heading_up = false;
-            }
-            map.zones.clear();
-            map.style.background_opacity = 0.35;
-            map.style.primary = lay.skin.accent;
-            map.move_to(right - map.placement.w, 2.0 * m);
-
+            speed.move_to(lay.edge(), row_top - strip_gap - d);
             out.push(speed);
             out.extend(row);
-            out.extend([profile, map]);
+            out.extend([profile, lay.edge_map(next_id(), 0.22)]);
         }
-        // Bottom-left: big pace with heart-rate zones and distance right beside it, a row of
-        // secondary readouts above; elevation profile along the bottom; small map.
+        // Same edge strip as cycling: pace, distance, elapsed time, grade, altitude and
+        // cadence ending in the elevation profile, with an EKG heart-rate monitor stacked on
+        // the pace tile and a close-up moving map top-right.
         Template::Running => {
-            let p = 0.15;
-            let half = (p * u - gap) / 2.0 / u;
-            let mut pace = lay.readout(DigitalPace, next_id(), p);
-            let mut hr = lay.readout(HrZone, next_id(), half);
-            zone_bar(&mut hr, 20);
-            hr.name = "Heart rate zones".into();
-            hr.placement.h = half * u;
-            let distance = lay.readout(DigitalDistance, next_id(), half);
-            let col_w = distance.placement.w.max(0.3 * u);
-            let mut col = [hr, distance];
-
-            let mut split = lay.readout(LapTime, next_id(), 0.065);
-            split.name = "Split time".into();
-            split.style.label = "SPLIT".into();
-            let mut second = [
-                lay.readout(DigitalCadence, next_id(), 0.065),
-                lay.readout(DigitalAltitude, next_id(), 0.065),
-                lay.readout(DigitalGrade, next_id(), 0.065),
-                split,
+            let profile = lay.edge_profile(next_id(), 0.36);
+            let mut ekg = lay.readout(HrEkg, next_id(), STRIP_TILE);
+            let mut pace = lay.readout(DigitalPace, next_id(), STRIP_TILE);
+            pace.placement.w = pace.placement.w.max(ekg.placement.w);
+            let mut elapsed = lay.readout(RecordingTime, next_id(), STRIP_TILE);
+            elapsed.name = "Elapsed time".into();
+            elapsed.style.label = "ELAPSED".into();
+            let mut row = [
+                pace,
+                lay.readout(DigitalDistance, next_id(), STRIP_TILE),
+                elapsed,
+                lay.readout(DigitalGrade, next_id(), STRIP_TILE),
+                lay.readout(DigitalAltitude, next_id(), STRIP_TILE),
+                lay.readout(DigitalCadence, next_id(), STRIP_TILE),
             ];
-            let primary_w = pace.placement.w + gap + col_w;
-            let second_w = row_width(&second, gap);
-            if second_w > primary_w {
-                pace.placement.w += second_w - primary_w;
-            } else {
-                spread(&mut second, primary_w, gap);
-            }
-            let top = bottom - p * u;
-            pace.move_to(m, top);
-            column_at(&mut col, m + pace.placement.w + gap, top, col_w, gap);
-            let second_y = top - gap - second[0].placement.h;
-            row_at(&mut second, m, second_y, gap);
-            let right = m + pace.placement.w + gap + col_w;
-            out.push(pace);
-            out.extend(col);
-            out.extend(second);
-            out.push(lay.profile(next_id(), right + 3.0 * gap));
-            let mut map = lay.dial(FullRouteMap, next_id(), 0.22);
-            lay.top_right(&mut map);
-            out.push(map);
+            let (row_top, strip_gap, tile_h) =
+                lay.strip(&mut row, STRIP_TILE, lay.edge(), profile.placement.x, true);
+            // As tall as the row and as wide as the pace tile beneath it.
+            lay.fit(&mut ekg, tile_h);
+            ekg.placement.w = row[0].placement.w;
+            ekg.move_to(lay.edge(), row_top - strip_gap - ekg.placement.h);
+            out.push(ekg);
+            out.extend(row);
+            out.extend([profile, lay.edge_map(next_id(), 0.22)]);
         }
-        // Bottom-left marine cluster: speed dial, heading compass and wind rose side by side
-        // with VMG, heel and distance; GPS track in the top-right corner.
+        // One instrument column down the left edge: GPS track, then VMG, heel and distance at
+        // the map's width, the speed dial, and the wind rose and heading compass side by side
+        // at the bottom. A heading tape spans the top from the map to the right edge.
         Template::Sailing => {
-            let d = 0.24 * u;
-            let c = 0.18 * u;
-            let row_h = (d - 2.0 * gap) / 3.0 / u;
-            let mut speed = lay.sized(AviationSpeed, next_id(), d, d);
-            speed.name = "Boat speed".into();
-            speed.style.label = "SPEED".into();
-            let compass = lay.sized(Compass, next_id(), c, c);
-            let wind = lay.sized(WindDial, next_id(), c, c);
-            let mut heel = lay.readout(DigitalCadence, next_id(), row_h);
+            let e = lay.edge();
+            let tile = 0.07;
+            let mut heel = lay.readout(DigitalCadence, next_id(), tile);
             bind_custom(&mut heel, "heel", "Heel", -45.0, 45.0);
             heel.style.suffix = "°".into();
             heel.style.primary = Rgba::WHITE;
-            lay.fit(&mut heel, row_h * u);
-            let mut col = [
-                lay.readout(DigitalVmg, next_id(), row_h),
+            lay.fit(&mut heel, tile * u);
+            let mut tiles = [
+                lay.readout(DigitalVmg, next_id(), tile),
                 heel,
-                lay.readout(DigitalDistance, next_id(), row_h),
+                lay.readout(DigitalDistance, next_id(), tile),
             ];
-            let col_w = widest(&col);
+            let col_w = widest(&tiles).max(0.23 * u);
 
-            let top = bottom - d;
-            let mid = top + (d - c) / 2.0;
-            let mut dials = [compass, wind];
-            speed.move_to(m, top);
-            row_at(&mut dials, m + d + gap, mid, gap);
-            column_at(&mut col, m + d + 2.0 * (c + gap) + gap, top, col_w, gap);
-            out.push(speed);
-            out.extend(dials);
-            out.extend(col);
-            let mut track_map = lay.dial(FullRouteMap, next_id(), 0.22);
+            let mut track_map = lay.sized(FullRouteMap, next_id(), col_w, col_w);
             track_map.name = "GPS track".into();
-            lay.top_right(&mut track_map);
-            out.push(track_map);
+            track_map.move_to(e, e);
+            let tiles_y = e + col_w + gap;
+            column_at(&mut tiles, e, tiles_y, col_w, gap);
+
+            // Dials from the bottom up: wind and heading, then speed above them.
+            let c = 0.155 * u;
+            let mut small = [
+                lay.sized(WindDial, next_id(), c, c),
+                lay.sized(Compass, next_id(), c, c),
+            ];
+            row_at(&mut small, e, bottom_e(&lay) - c, gap);
+            let d = 0.25 * u;
+            let mut speed = lay.sized(AviationSpeed, next_id(), d, d);
+            speed.name = "Boat speed".into();
+            speed.style.label = "SPEED".into();
+            speed.move_to(e, bottom_e(&lay) - c - gap - d);
+
+            let tape_x = e + col_w + gap;
+            let mut heading = lay.sized(HeadingTape, next_id(), video.0 - e - tape_x, 0.075 * u);
+            heading.style.primary = Rgba::WHITE;
+            heading.style.accent = Rgba::rgb(255, 90, 70);
+            heading.move_to(tape_x, e);
+
+            out.extend([track_map, heading]);
+            out.extend(tiles);
+            out.push(speed);
+            out.extend(small);
         }
         // Bottom-left: large elevation and distance with climbing and speed readouts above;
         // compass on its own in the top-right corner; elevation profile along the bottom.
@@ -1653,43 +1702,26 @@ pub fn apply_template(
             lay.top_right(&mut compass);
             out.push(compass);
         }
-        // Bottom-center race cluster: tachometer in the middle, speed and G-force on its left,
-        // a large gear digit on its right, throttle and brake bars beneath. Lap time and delta
-        // top-left, track map top-right.
+        // Edge-hugging race dash: a large speedometer in the bottom-left corner with the
+        // tachometer beside it, then a bottom row of throttle and brake, gear, G-force and heart
+        // rate. Close-up track map top-right with lap time and lap delta beneath it.
         Template::Motorsport => {
+            let e = lay.edge();
+            let tile = DASH_TILE * u;
+            let d = 0.32 * u;
+            let mut speed = lay.sized(MotorsportSpeed, next_id(), d, d);
+            speed.name = "Speedometer".into();
+            speed.move_to(e, bottom_e(&lay) - d);
             // RPM, gear, throttle and brake come from car data loggers, as custom fields.
-            let d = 0.28 * u;
-            let mut rpm = lay.sized(MotorsportSpeed, next_id(), d, d);
+            let r = 0.22 * u;
+            let mut rpm = lay.sized(MotorsportSpeed, next_id(), r, r);
             bind_custom(&mut rpm, "rpm", "RPM", 0.0, 10000.0);
             rpm.zones = vec![Zone {
                 from: 8500.0,
                 color: Rgba::rgb(235, 40, 40),
                 label: "Redline".into(),
             }];
-            let speed_h = 0.17;
-            let mut left = [
-                lay.readout(DigitalSpeed, next_id(), speed_h),
-                lay.readout(DigitalGForce, next_id(), (d - gap) / u - speed_h),
-            ];
-            let left_w = widest(&left);
-            let mut gear = lay.readout(DigitalCadence, next_id(), 0.1);
-            bind_custom(&mut gear, "gear", "Gear", 0.0, 8.0);
-            gear.style.primary = Rgba::WHITE;
-            gear.style.show_units = false;
-            gear.kind = GaugeKind::Digital {
-                align: TextAlign::Center,
-                icon: DigitalIcon::None,
-            };
-            gear.placement.h = d;
-            gear.placement.w = d * 0.62;
-
-            let w = left_w + gap + d + gap + gear.placement.w;
-            let x0 = (video.0 - w) / 2.0;
-            let bar_h = 0.045 * u;
-            let top = bottom - bar_h - gap - d;
-            column_at(&mut left, x0, top, left_w, gap);
-            rpm.move_to(x0 + left_w + gap, top);
-            gear.move_to(x0 + left_w + d + 2.0 * gap, top);
+            rpm.move_to(e + d + gap, bottom_e(&lay) - r);
 
             let pedal = |mut g: Gauge, key: &str, label: &str, color: Rgba| {
                 bind_custom(&mut g, key, label, 0.0, 100.0);
@@ -1697,51 +1729,77 @@ pub fn apply_template(
                     orientation: Orientation::Horizontal,
                     segments: 0,
                     rounded: false,
-                    thickness: 0.5,
+                    thickness: 0.35,
                     show_value: false,
                 };
                 g.style.primary = color;
-                g.placement.w = (w - gap) / 2.0;
-                g.placement.h = bar_h;
+                g.placement.w = 1.9 * tile;
+                g.placement.h = tile;
                 g
             };
-            let mut bars = [
-                pedal(
-                    lay.sized(CadenceBar, next_id(), 0.0, 0.0),
-                    "throttle",
-                    "Throttle",
-                    Rgba::rgb(70, 210, 110),
-                ),
-                pedal(
-                    lay.sized(CadenceBar, next_id(), 0.0, 0.0),
-                    "brake",
-                    "Brake",
-                    Rgba::rgb(240, 60, 50),
-                ),
+            let throttle = pedal(
+                lay.sized(CadenceBar, next_id(), 0.0, 0.0),
+                "throttle",
+                "Throttle",
+                Rgba::rgb(70, 210, 110),
+            );
+            let brake = pedal(
+                lay.sized(CadenceBar, next_id(), 0.0, 0.0),
+                "brake",
+                "Brake",
+                Rgba::rgb(240, 60, 50),
+            );
+            let mut gear = lay.readout(DigitalCadence, next_id(), DASH_TILE);
+            bind_custom(&mut gear, "gear", "Gear", 0.0, 8.0);
+            gear.style.primary = Rgba::WHITE;
+            gear.style.show_units = false;
+            gear.kind = GaugeKind::Digital {
+                align: TextAlign::Center,
+                icon: DigitalIcon::None,
+            };
+            lay.fit(&mut gear, tile);
+            let mut hr = lay.readout(DigitalHr, next_id(), DASH_TILE);
+            hr.style.primary = Rgba::WHITE;
+            let mut row = [
+                throttle,
+                brake,
+                gear,
+                lay.readout(DigitalGForce, next_id(), DASH_TILE),
+                hr,
             ];
-            row_at(&mut bars, x0, bottom - bar_h, gap);
-            out.extend(left);
-            out.extend([rpm, gear]);
-            out.extend(bars);
+            lay.strip(
+                &mut row,
+                DASH_TILE,
+                e + d + gap + r + gap,
+                video.0 - e,
+                false,
+            );
+            out.extend([speed, rpm]);
+            out.extend(row);
 
+            let mut track_map = lay.edge_map(next_id(), 0.24);
+            track_map.name = "Track map".into();
             let mut lap = [
                 lay.readout(LapTime, next_id(), 0.075),
                 lay.readout(DigitalLapDelta, next_id(), 0.075),
             ];
-            let lap_w = widest(&lap);
-            column_at(&mut lap, m, m, lap_w, gap);
-            out.extend(lap);
-            let mut track_map = lay.dial(FullRouteMap, next_id(), 0.2);
-            track_map.name = "Track map".into();
-            lay.top_right(&mut track_map);
+            let lap_w = widest(&lap).max(track_map.placement.w);
+            track_map.placement.w = lap_w;
+            track_map.move_to(video.0 - e - lap_w, track_map.placement.y);
+            let lap_y = track_map.placement.y + track_map.placement.h + gap;
+            column_at(&mut lap, video.0 - e - lap_w, lap_y, lap_w, gap);
             out.push(track_map);
+            out.extend(lap);
         }
-        // HUD: airspeed tape on the left edge with ground speed under it, altitude and
-        // vertical-speed tapes on the right edge, heading tape top-center, a compact
-        // artificial horizon bottom-center and the GPS route bottom-right.
+        // Edge-hugging HUD: speed tape on the left edge with ground speed at its foot,
+        // altitude and vertical-speed tapes on the right edge, all three standing on the
+        // bottom edge at one height; artificial horizon bottom-center; an altitude profile and
+        // the heading tape side by side along the top; GPS route in the top-right corner.
         Template::Aviation => {
+            let e = lay.edge();
+            let bottom = bottom_e(&lay);
             let tape_h = 0.46 * u;
-            let tape_top = (video.1 - tape_h) / 2.0;
+            let tape_top = bottom - tape_h;
             let mut airspeed = lay.sized(SpeedTape, next_id(), 0.1 * u, tape_h);
             airspeed.name = "Airspeed".into();
             airspeed.style.label = "SPD".into();
@@ -1756,27 +1814,38 @@ pub fn apply_template(
             for g in [&mut airspeed, &mut altitude, &mut vsi] {
                 g.style.primary = lay.skin.accent;
             }
-            airspeed.move_to(m, tape_top);
-            vsi.move_to(lay.right() - vsi.placement.w, tape_top);
+            airspeed.move_to(e, tape_top);
+            vsi.move_to(video.0 - e - vsi.placement.w, tape_top);
             altitude.move_to(vsi.placement.x - gap - altitude.placement.w, tape_top);
             let mut gs = lay.readout(DigitalSpeed, next_id(), 0.065);
             gs.name = "Ground speed".into();
             gs.style.label = "GS".into();
-            gs.placement.w = gs.placement.w.max(airspeed.placement.w);
-            gs.move_to(m, tape_top + tape_h + gap);
+            gs.move_to(e + airspeed.placement.w + gap, bottom - gs.placement.h);
 
-            let mut heading = lay.sized(HeadingTape, next_id(), 0.42 * u, 0.08 * u);
-            heading.style.primary = lay.skin.accent;
-            heading.move_to((video.0 - heading.placement.w) / 2.0, m);
-            let mut horizon = lay.dial(AttitudeIndicator, next_id(), 0.2);
+            let mut horizon = lay.dial(AttitudeIndicator, next_id(), 0.29);
             horizon.move_to(
                 (video.0 - horizon.placement.w) / 2.0,
                 bottom - horizon.placement.h,
             );
+
+            // Top pair, centered: altitude profile and heading tape at one height.
+            let top_h = 0.085 * u;
+            let mut profile = lay.sized(ElevationGraph, next_id(), 0.4 * u, top_h);
+            profile.name = "Altitude profile".into();
+            profile.style.label = "ALTITUDE".into();
+            let mut heading = lay.sized(HeadingTape, next_id(), 0.42 * u, top_h);
+            heading.style.primary = lay.skin.accent;
+            let mut top = [profile, heading];
+            let x0 = (video.0 - row_width(&top, gap)) / 2.0;
+            row_at(&mut top, x0, e, gap);
+
             let mut route = lay.dial(FullRouteMap, next_id(), 0.2);
             route.name = "GPS route".into();
-            route.move_to(lay.right() - route.placement.w, bottom - route.placement.h);
-            out.extend([airspeed, gs, altitude, vsi, heading, horizon, route]);
+            route.style.background_opacity = 0.35;
+            route.move_to(video.0 - e - route.placement.w, e);
+            out.extend([airspeed, gs, altitude, vsi, horizon]);
+            out.extend(top);
+            out.push(route);
         }
     }
     for g in &mut out {
