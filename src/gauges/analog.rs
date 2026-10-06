@@ -104,9 +104,12 @@ fn look(d: DialStyle) -> Look {
             needle_width: 0.0,
         },
         // Drawn by their own builders below.
-        DialStyle::ZoneArc | DialStyle::LedRing | DialStyle::PeakArc | DialStyle::Compass => {
-            look(DialStyle::Minimal)
-        }
+        DialStyle::ZoneArc
+        | DialStyle::LedRing
+        | DialStyle::PeakArc
+        | DialStyle::Compass
+        | DialStyle::Horizon
+        | DialStyle::Wind => look(DialStyle::Minimal),
     }
 }
 
@@ -125,6 +128,8 @@ pub fn build(
         DialStyle::LedRing => return build_led_ring(g, ctx),
         DialStyle::PeakArc => return build_peak_arc(g, ctx, major_ticks),
         DialStyle::Compass => return build_compass(g, ctx),
+        DialStyle::Horizon => return build_horizon(g, ctx),
+        DialStyle::Wind => return build_wind(g, ctx),
         _ => {}
     }
     let mut s = Scene::new();
@@ -960,5 +965,332 @@ fn build_peak_arc(g: &Gauge, ctx: &RenderCtx<'_>, major_ticks: u32) -> Scene {
         )
     });
     center_readout(&mut s, g, ctx, &d, value, zc, sub);
+    s
+}
+
+/// Pitch and bank (degrees, nose up / right wing down positive) at the current instant: the
+/// `pitch` / `roll` fields when the recording has them, else estimated from GPS — pitch as the
+/// flight-path angle, bank from the turn rate for a coordinated turn.
+pub fn attitude(g: &Gauge, ctx: &RenderCtx<'_>) -> Option<(f64, f64)> {
+    use crate::telemetry::Metric;
+    let track = ctx.track?;
+    let t = ctx.gps_t();
+    let sm = g.smoothing;
+    let speed = track.value_smoothed(Metric::Speed, t, sm);
+    let roll = track.extra_value("roll", t, sm).or_else(|| {
+        let v = speed?;
+        let h0 = track.value(Metric::Heading, t - 1.0)?;
+        let h1 = track.value(Metric::Heading, t + 1.0)?;
+        let turn = ((h1 - h0 + 540.0).rem_euclid(360.0) - 180.0) / 2.0;
+        Some((v * turn.to_radians() / 9.81).atan().to_degrees())
+    })?;
+    let pitch = track
+        .extra_value("pitch", t, sm)
+        .or_else(|| {
+            let v = speed?;
+            let vs = track.value_smoothed(Metric::VerticalSpeed, t, sm)?;
+            Some(if v > 1.0 {
+                vs.atan2(v).to_degrees()
+            } else {
+                0.0
+            })
+        })
+        .unwrap_or(0.0);
+    Some((pitch.clamp(-30.0, 30.0), roll.clamp(-60.0, 60.0)))
+}
+
+/// Artificial horizon: sky and ground split by a horizon that tilts with bank and moves with
+/// pitch, a pitch ladder, a fixed bank scale with a moving pointer and a fixed aircraft symbol.
+fn build_horizon(g: &Gauge, ctx: &RenderCtx<'_>) -> Scene {
+    let mut s = Scene::new();
+    let st = &g.style;
+    let fs = st.font_scale.max(0.1);
+    let d = Dial::new(g);
+    let (cx, cy, r) = (d.cx, d.cy, d.r);
+    let att = attitude(g, ctx);
+    let (pitch, roll) = att.map(|(p, r)| (p as f32, r as f32)).unwrap_or((0.0, 0.0));
+    let alpha = st.background_opacity.max(0.55);
+    let sky = Rgba::rgb(40, 116, 196).with_alpha_mul(alpha);
+    let ground = Rgba::rgb(126, 84, 44).with_alpha_mul(alpha);
+
+    // Card frame: `u` along the horizon, `n` toward the ground.
+    let a = (-roll).to_radians();
+    let (u, n) = ((a.cos(), a.sin()), (-a.sin(), a.cos()));
+    let pt = |x: f32, y: f32| (cx + x * u.0 + y * n.0, cy + x * u.1 + y * n.1);
+    let ppd = r * 0.8 / 25.0;
+    let off = pitch * ppd;
+    let inner = r * 0.94;
+
+    s.fill(scene::circle(cx, cy, inner), sky);
+    if off <= -inner {
+        s.fill(scene::circle(cx, cy, inner), ground);
+    } else if off < inner {
+        let half = (inner * inner - off * off).sqrt();
+        let a0 = off.atan2(half).to_degrees();
+        let steps = 48;
+        let pts: Vec<(f32, f32)> = (0..=steps)
+            .map(|i| {
+                let th = (a0 + (180.0 - 2.0 * a0) * i as f32 / steps as f32).to_radians();
+                pt(inner * th.cos(), inner * th.sin())
+            })
+            .collect();
+        s.fill(scene::polygon(&pts), ground);
+        let (x0, y0) = pt(-half, off);
+        let (x1, y1) = pt(half, off);
+        s.stroke(
+            scene::line(x0, y0, x1, y1),
+            Rgba::WHITE,
+            r * 0.02,
+            Cap::Butt,
+        );
+    }
+
+    // Pitch ladder.
+    for p in [-20.0f32, -10.0, -5.0, 5.0, 10.0, 20.0] {
+        let y = off - p * ppd;
+        if y.abs() > r * 0.62 {
+            continue;
+        }
+        let half = if p.abs() >= 10.0 { r * 0.24 } else { r * 0.12 };
+        let (x0, y0) = pt(-half, y);
+        let (x1, y1) = pt(half, y);
+        s.stroke(
+            scene::line(x0, y0, x1, y1),
+            Rgba::WHITE.with_alpha(210),
+            r * 0.014,
+            Cap::Butt,
+        );
+        if p.abs() >= 10.0 {
+            for side in [-1.0f32, 1.0] {
+                let (lx, ly) = pt(side * (half + r * 0.09), y);
+                s.text(
+                    format!("{}", p.abs() as i32),
+                    lx,
+                    ly,
+                    r * 0.08 * fs,
+                    super::model::FontWeight::Bold,
+                    HAlign::Center,
+                    VAlign::Middle,
+                    Rgba::WHITE.with_alpha(210),
+                );
+            }
+        }
+    }
+
+    // Bank scale (fixed) and the pointer that turns with the horizon.
+    s.stroke(
+        scene::circle(cx, cy, inner),
+        st.secondary,
+        r * 0.025,
+        Cap::Butt,
+    );
+    for k in [
+        -60.0f32, -45.0, -30.0, -20.0, -10.0, 10.0, 20.0, 30.0, 45.0, 60.0,
+    ] {
+        let len = if k.abs() == 30.0 || k.abs() == 60.0 {
+            0.12
+        } else {
+            0.07
+        };
+        let (x0, y0) = scene::polar(cx, cy, inner, 270.0 + k);
+        let (x1, y1) = scene::polar(cx, cy, inner - r * len, 270.0 + k);
+        s.stroke(
+            scene::line(x0, y0, x1, y1),
+            Rgba::WHITE,
+            r * 0.018,
+            Cap::Butt,
+        );
+    }
+    let zero = [
+        (cx, cy - inner + r * 0.1),
+        (cx - r * 0.05, cy - inner),
+        (cx + r * 0.05, cy - inner),
+    ];
+    s.fill(scene::polygon(&zero), Rgba::WHITE);
+    let (tx, ty) = pt(0.0, -(inner - r * 0.11));
+    let (b1x, b1y) = pt(-r * 0.05, -(inner - r * 0.2));
+    let (b2x, b2y) = pt(r * 0.05, -(inner - r * 0.2));
+    s.fill(
+        scene::polygon(&[(tx, ty), (b1x, b1y), (b2x, b2y)]),
+        st.accent,
+    );
+
+    // Fixed aircraft symbol.
+    let wing = r * 0.045;
+    for side in [-1.0f32, 1.0] {
+        s.stroke(
+            scene::polyline(&[
+                (cx + side * r * 0.55, cy),
+                (cx + side * r * 0.2, cy),
+                (cx + side * r * 0.2, cy + r * 0.08),
+            ]),
+            Rgba::BLACK.with_alpha(160),
+            wing * 1.6,
+            Cap::Butt,
+        );
+        s.stroke(
+            scene::polyline(&[
+                (cx + side * r * 0.55, cy),
+                (cx + side * r * 0.2, cy),
+                (cx + side * r * 0.2, cy + r * 0.08),
+            ]),
+            st.accent,
+            wing,
+            Cap::Butt,
+        );
+    }
+    s.fill(scene::circle(cx, cy, wing * 0.8), st.accent);
+
+    if st.show_label {
+        let text = match att {
+            // Rounded first so small values read 0, not -0.
+            Some((p, b)) => format!("P {:+}°  B {:+}°", p.round() as i32, b.round() as i32),
+            None => "ATT --".to_string(),
+        };
+        s.text(
+            text,
+            cx,
+            cy + r * 0.66,
+            r * 0.1 * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            Rgba::WHITE,
+        );
+    }
+    s
+}
+
+/// Heading-up wind rose: the card turns with the boat's heading so the arrow (from the
+/// `wind_direction` field, degrees true) shows where the wind comes from relative to the bow.
+/// The `wind_speed` field and the true wind angle are shown in the middle.
+fn build_wind(g: &Gauge, ctx: &RenderCtx<'_>) -> Scene {
+    use crate::telemetry::Metric;
+    let mut s = Scene::new();
+    let st = &g.style;
+    let fs = st.font_scale.max(0.1);
+    let d = Dial::new(g);
+    let (cx, cy, r) = (d.cx, d.cy, d.r);
+    dial_face(&mut s, g, &d, None);
+    s.stroke(
+        scene::circle(cx, cy, r * 0.97),
+        st.secondary,
+        r * 0.025,
+        Cap::Butt,
+    );
+    let t = ctx.gps_t();
+    let heading = ctx
+        .track
+        .and_then(|tr| tr.value_smoothed(Metric::Heading, t, g.smoothing))
+        .unwrap_or(0.0) as f32;
+    let at = |bearing: f32| 270.0 + bearing - heading;
+
+    if st.show_ticks {
+        for i in 0..36 {
+            let b = i as f32 * 10.0;
+            let len = if i % 9 == 0 {
+                0.12
+            } else if i % 3 == 0 {
+                0.08
+            } else {
+                0.04
+            };
+            let (x0, y0) = scene::polar(cx, cy, r * 0.93, at(b));
+            let (x1, y1) = scene::polar(cx, cy, r * (0.93 - len), at(b));
+            s.stroke(
+                scene::line(x0, y0, x1, y1),
+                st.secondary,
+                r * 0.018,
+                Cap::Butt,
+            );
+        }
+    }
+    for (i, name) in ["N", "E", "S", "W"].iter().enumerate() {
+        let (lx, ly) = scene::polar(cx, cy, r * 0.7, at(i as f32 * 90.0));
+        s.text(
+            *name,
+            lx,
+            ly,
+            r * 0.13 * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            if i == 0 { st.accent } else { st.secondary },
+        );
+    }
+    // Bow mark.
+    s.fill(
+        scene::polygon(&[
+            (cx, cy - r * 0.8),
+            (cx - r * 0.06, cy - r * 0.95),
+            (cx + r * 0.06, cy - r * 0.95),
+        ]),
+        st.text,
+    );
+
+    let dir = gauge_value(g, ctx);
+    if let Some(dir) = dir {
+        let a = at(dir as f32);
+        let (x0, y0) = scene::polar(cx, cy, r * 0.95, a);
+        let (x1, y1) = scene::polar(cx, cy, r * 0.62, a);
+        s.glow_stroke(
+            scene::line(x0, y0, x1, y1),
+            st.primary,
+            r * 0.06,
+            Cap::Round,
+            st.glow,
+        );
+        let tip = scene::polar(cx, cy, r * 0.46, a);
+        let b1 = scene::polar(cx, cy, r * 0.66, a - 14.0);
+        let b2 = scene::polar(cx, cy, r * 0.66, a + 14.0);
+        s.glow_fill(
+            scene::polygon(&[tip, b1, b2]),
+            st.primary,
+            st.glow,
+            r * 0.04,
+        );
+    }
+
+    if st.show_label {
+        s.text(
+            g.label(),
+            cx,
+            cy - r * 0.26,
+            r * 0.09 * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            st.secondary,
+        );
+    }
+    let speed = ctx
+        .track
+        .and_then(|tr| tr.extra_value("wind_speed", t, g.smoothing));
+    s.text(
+        speed
+            .map(|v| format!("{:.0}", v))
+            .unwrap_or_else(|| "--".into()),
+        cx,
+        cy + r * 0.02,
+        r * 0.3 * fs,
+        st.font_weight,
+        HAlign::Center,
+        VAlign::Middle,
+        st.text,
+    );
+    if let Some(dir) = dir {
+        let twa = (dir as f32 - heading + 540.0).rem_euclid(360.0) - 180.0;
+        let side = if twa >= 0.0 { "S" } else { "P" };
+        s.text(
+            format!("TWA {:.0}° {side}", twa.abs()),
+            cx,
+            cy + r * 0.28,
+            r * 0.095 * fs,
+            super::model::FontWeight::Bold,
+            HAlign::Center,
+            VAlign::Middle,
+            st.primary,
+        );
+    }
     s
 }

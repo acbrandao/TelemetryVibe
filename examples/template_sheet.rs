@@ -1,6 +1,6 @@
 //! Renders every built-in template on a 1920×1080 frame into one PNG (visual regression aid).
 //!
-//! `cargo run --release --example template_sheet -- out.png`
+//! `cargo run --release --example template_sheet -- out.png [scale] [WIDTHxHEIGHT]`
 
 use telemetryvibe::gauges::library::{Template, apply_template};
 use telemetryvibe::gauges::model::GaugeId;
@@ -30,8 +30,14 @@ fn main() {
             extra: vec![
                 ("rpm".into(), rpm),
                 ("gear".into(), (rpm / 2000.0).floor() + 1.0),
-                ("throttle".into(), ((t * 0.2).sin() * 60.0 + 40.0).clamp(0.0, 100.0)),
+                (
+                    "throttle".into(),
+                    ((t * 0.2).sin() * 60.0 + 40.0).clamp(0.0, 100.0),
+                ),
                 ("brake".into(), ((t * 0.2).cos() * -80.0).clamp(0.0, 100.0)),
+                ("wind_direction".into(), 220.0 + (t * 0.03).sin() * 20.0),
+                ("wind_speed".into(), 14.0 + (t * 0.07).sin() * 3.0),
+                ("heel".into(), (t * 0.05).sin() * 18.0),
             ],
             ..Default::default()
         });
@@ -47,8 +53,13 @@ fn main() {
         units: UnitSystem::Metric,
     };
 
-    let (vw, vh) = (1920.0f32, 1080.0f32);
-    let scale = 0.5;
+    let args: Vec<String> = std::env::args().collect();
+    let scale: f32 = args.get(2).and_then(|s| s.parse().ok()).unwrap_or(0.5);
+    let (vw, vh) = args
+        .get(3)
+        .and_then(|s| s.split_once('x'))
+        .and_then(|(w, h)| Some((w.parse::<f32>().ok()?, h.parse::<f32>().ok()?)))
+        .unwrap_or((1920.0, 1080.0));
     let (cw, ch) = ((vw * scale) as u32, (vh * scale) as u32);
     let cols = 2u32;
     let rows = (Template::ALL.len() as u32).div_ceil(cols);

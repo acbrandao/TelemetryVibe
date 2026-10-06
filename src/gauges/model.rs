@@ -258,10 +258,14 @@ pub enum DialStyle {
     PeakArc,
     /// Rotating compass card with a fixed lubber line; for heading.
     Compass,
+    /// Artificial horizon: pitch and bank from `pitch` / `roll` fields, else derived from GPS.
+    Horizon,
+    /// Heading-up wind rose: an arrow from the `wind_direction` field, `wind_speed` inside.
+    Wind,
 }
 
 impl DialStyle {
-    pub const ALL: [DialStyle; 10] = [
+    pub const ALL: [DialStyle; 12] = [
         DialStyle::Automotive,
         DialStyle::Motorsport,
         DialStyle::Aviation,
@@ -272,6 +276,8 @@ impl DialStyle {
         DialStyle::LedRing,
         DialStyle::PeakArc,
         DialStyle::Compass,
+        DialStyle::Horizon,
+        DialStyle::Wind,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -285,6 +291,8 @@ impl DialStyle {
             DialStyle::LedRing => "LED ring",
             DialStyle::PeakArc => "Peak hold arc",
             DialStyle::Compass => "Compass",
+            DialStyle::Horizon => "Artificial horizon",
+            DialStyle::Wind => "Wind",
         }
     }
 }

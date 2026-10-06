@@ -14,7 +14,8 @@ use crate::utils::timecode::{format_offset, format_timecode, format_wall_time};
 /// Font size for times and offsets in this panel.
 const BIG: f32 = 20.0;
 const MEDIUM: f32 = 15.0;
-const VIEW_H: f32 = 300.0;
+/// Height of the map and graph, kept low so the timeline and video stay visible behind the window.
+const VIEW_H: f32 = 220.0;
 const LAP_COLOR: Color32 = theme::ACCENT_2;
 /// Per-sport colors for multi-sport recordings.
 const SESSION_COLORS: [Color32; 5] = [
@@ -35,19 +36,22 @@ pub struct SyncState {
     pub map_zoom: f32,
     /// Route map center in route meters (`None` = middle of the route).
     pub map_center: Option<[f64; 2]>,
+    /// Footer card height on the last frame, so the body above can be sized to leave room for it.
+    pub footer_h: f32,
 }
 
 pub fn window(app: &mut GaugeApp, ctx: &egui::Context) {
     let mut open = app.ui.show_sync;
     egui::Window::new("Synchronize GPS with Video")
         .open(&mut open)
-        .default_width(900.0)
+        .default_size(vec2(1120.0, 600.0))
+        .min_width(820.0)
+        .min_height(420.0)
         .resizable(true)
         .collapsible(false)
-        // Scroll rather than overflow on short screens.
-        .vscroll(true)
+        // The body scrolls on its own so the footer with the actions always stays visible.
         .show(ctx, |ui| contents(app, ui));
-    // `contents` may close the window itself (Sync button).
+    // `contents` may close the window itself (Sync / Cancel buttons).
     if !open {
         app.ui.show_sync = false;
     }
@@ -55,168 +59,296 @@ pub fn window(app: &mut GaugeApp, ctx: &egui::Context) {
 
 fn contents(app: &mut GaugeApp, ui: &mut egui::Ui) {
     let Some(track) = app.state.track.clone() else {
-        ui.label("Import a GPS file to synchronize.");
-        if ui.button("Import GPS…").clicked() {
-            app.import_dialog_gps();
-        }
+        card(ui, |ui| {
+            ui.label(RichText::new("Import a GPS file to synchronize.").size(MEDIUM));
+            ui.add_space(6.0);
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Import GPS…").size(MEDIUM))
+                        .min_size(vec2(140.0, 34.0)),
+                )
+                .clicked()
+            {
+                app.import_dialog_gps();
+            }
+        });
         return;
     };
+
+    // Body, scrolling above the footer (whose height is measured on the previous frame).
+    let footer_h = app.ui.sync.footer_h.max(80.0);
+    let body_h = (ui.available_height() - footer_h - ui.spacing().item_spacing.y).max(120.0);
+    egui::ScrollArea::vertical()
+        .id_salt("sync_body")
+        .max_height(body_h)
+        .auto_shrink([false, false])
+        .show(ui, |ui| {
+            video_card(app, ui, &track);
+            ui.add_space(CARD_GAP);
+            pick_card(app, ui, &track);
+        });
+
+    ui.add_space(CARD_GAP);
+    let footer = card(ui, |ui| footer(app, ui, &track));
+    app.ui.sync.footer_h = footer.response.rect.height();
+}
+
+/// Space between cards.
+const CARD_GAP: f32 = 6.0;
+
+/// A full-width rounded card.
+fn card<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> egui::InnerResponse<R> {
+    egui::Frame::group(ui.style())
+        .fill(ui.visuals().faint_bg_color)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .corner_radius(8)
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            add(ui)
+        })
+}
+
+/// Numbered step heading followed by a short hint on the same line.
+fn step_heading(ui: &mut egui::Ui, step: &str, title: &str, hint: &str) {
+    ui.horizontal_wrapped(|ui| {
+        ui.label(
+            RichText::new(step)
+                .strong()
+                .size(MEDIUM + 2.0)
+                .color(theme::ACCENT),
+        );
+        ui.label(RichText::new(title).strong().size(MEDIUM + 2.0));
+        ui.add_space(8.0);
+        ui.label(RichText::new(hint).weak());
+    });
+    ui.add_space(4.0);
+}
+
+/// Step 1: pick a GPS moment on the detected events, the route map or the graph.
+fn pick_card(app: &mut GaugeApp, ui: &mut egui::Ui, track: &Track) {
     let offset = app.state.project.sync.offset;
     let units = app.state.project.units;
     let gps_now = app.state.gps_time();
-
-    // Status: large readouts of the current mapping.
-    ui.horizontal(|ui| {
-        // Video time with step buttons; the playhead only moves here or on the timeline.
-        let fd = 1.0 / app.state.fps();
-        step_button(app, ui, "−1s", -1.0, "Move the video back 1 second");
-        step_button(app, ui, "−", -fd, "Move the video back one frame");
-        readout(
+    card(ui, |ui| {
+        step_heading(
             ui,
-            "VIDEO",
-            &format_timecode(app.state.playhead),
-            ui.visuals().text_color(),
+            "2",
+            "Pick the same moment in the GPS data",
+            "Choose a detected event, or click the map or the graph.",
         );
-        step_button(app, ui, "+", fd, "Move the video forward one frame");
-        step_button(app, ui, "+1s", 1.0, "Move the video forward 1 second");
-        ui.add_space(12.0);
-        readout(
-            ui,
-            "GPS",
-            &format_wall_time(track.wall_time(gps_now), true),
-            theme::GPS_COLOR,
-        );
-        ui.add_space(12.0);
-        readout(ui, "OFFSET", &format_offset(offset), theme::ACCENT);
-        if let Some(v) = track.value(Metric::Speed, gps_now) {
-            ui.add_space(12.0);
-            readout(
-                ui,
-                "SPEED",
-                &format!(
-                    "{:.1} {}",
-                    to_display(Metric::Speed, v, units),
-                    unit_label(Metric::Speed, units)
-                ),
-                ui.visuals().weak_text_color(),
-            );
-        }
-    });
-    ui.separator();
 
-    ui.label(RichText::new("Match an event").strong().size(MEDIUM + 1.0));
-    ui.label(RichText::new("Pick a recognizable moment (a lap or transition, starting off, a stop, a turn) on the GPS graph, the map or the detected events. Move the video to the same moment with the buttons above or the timeline, then press Sync to link the two.").weak());
-
-    // Detected events (laps, sport changes, starts/stops) in a dropdown.
-    let events = event_labels(&track);
-    if !events.is_empty() {
-        ui.horizontal(|ui| {
-            ui.label(RichText::new("Detected:").size(MEDIUM));
+        // Detected events (laps, sport changes, starts/stops) and quick picks.
+        ui.horizontal_wrapped(|ui| {
+            let events = event_labels(track);
             let picked = app.ui.sync.picked_gps;
-            let selected = events
-                .iter()
-                .find(|(t, _)| picked.is_some_and(|p| (p - t).abs() < 1e-6))
-                .map(|(_, l)| l.clone())
-                .unwrap_or_else(|| format!("Jump to an event… ({})", events.len()));
-            let mut chosen = None;
-            egui::ComboBox::from_id_salt("sync_detected_events")
-                .selected_text(RichText::new(selected).monospace().size(MEDIUM))
-                .width(340.0)
-                .height(360.0)
-                .show_ui(ui, |ui| {
-                    for (t, label) in &events {
-                        let on = picked.is_some_and(|p| (p - t).abs() < 1e-6);
-                        if ui
-                            .selectable_label(on, RichText::new(label).monospace().size(MEDIUM))
-                            .clicked()
-                        {
-                            chosen = Some(*t);
+            if !events.is_empty() {
+                ui.label(RichText::new("Detected events").size(MEDIUM));
+                let selected = events
+                    .iter()
+                    .find(|(t, _)| picked.is_some_and(|p| (p - t).abs() < 1e-6))
+                    .map(|(_, l)| l.clone())
+                    .unwrap_or_else(|| format!("Choose an event… ({})", events.len()));
+                let mut chosen = None;
+                egui::ComboBox::from_id_salt("sync_detected_events")
+                    .selected_text(RichText::new(selected).monospace().size(MEDIUM))
+                    .width(360.0)
+                    .height(420.0)
+                    .show_ui(ui, |ui| {
+                        for (t, label) in &events {
+                            let on = picked.is_some_and(|p| (p - t).abs() < 1e-6);
+                            if ui
+                                .selectable_label(on, RichText::new(label).monospace().size(MEDIUM))
+                                .clicked()
+                            {
+                                chosen = Some(*t);
+                            }
                         }
-                    }
-                });
-            if let Some(t) = chosen {
-                app.ui.sync.picked_gps = Some(t);
-                center_map_on(app, &track, t);
+                    });
+                if let Some(t) = chosen {
+                    app.ui.sync.picked_gps = Some(t);
+                    center_map_on(app, track, t);
+                }
+                ui.add_space(12.0);
+            }
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Pick at playhead").size(MEDIUM))
+                        .min_size(vec2(0.0, 30.0)),
+                )
+                .on_hover_text("Pick the GPS moment the playhead shows with the current offset")
+                .clicked()
+            {
+                app.ui.sync.picked_gps = Some(gps_now);
+            }
+            let picked = app.ui.sync.picked_gps;
+            if ui
+                .add_enabled(
+                    picked.is_some(),
+                    egui::Button::new(RichText::new("Jump video to pick").size(MEDIUM))
+                        .min_size(vec2(0.0, 30.0)),
+                )
+                .on_hover_text(
+                    "Move the playhead to where the picked moment falls with the current offset — \
+                     a good starting point when the offset is already close",
+                )
+                .on_disabled_hover_text("Pick a GPS moment first")
+                .clicked()
+                && let Some(p) = picked
+            {
+                let t = app.state.project.sync.gps_to_video(p);
+                app.set_playhead(t);
+            }
+            if let Some(p) = picked {
+                ui.add_space(12.0);
+                ui.label(RichText::new("Picked").size(MEDIUM).weak());
+                ui.label(
+                    RichText::new(format_wall_time(track.wall_time(p), true))
+                        .monospace()
+                        .strong()
+                        .size(MEDIUM + 1.0)
+                        .color(theme::WARN),
+                );
             }
         });
-    }
-    ui.add_space(4.0);
+        ui.add_space(4.0);
 
-    // Route map + speed graph, sharing hover and pick.
-    // One block is reserved for both views so the layout below always starts underneath them.
-    let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), VIEW_H), Sense::hover());
-    let gap = 8.0;
-    let map = track.route.is_some().then(|| {
-        let side = VIEW_H.min(row.width() * 0.4);
-        let rect = Rect::from_min_size(row.min, vec2(side, VIEW_H));
-        (
-            rect,
-            ui.interact(rect, ui.id().with("sync_map"), Sense::click_and_drag()),
-        )
-    });
-    let graph_left = map.as_ref().map_or(row.left(), |(r, _)| r.right() + gap);
-    let graph_rect = Rect::from_min_max(pos2(graph_left, row.top()), row.max);
-    let graph = (
-        graph_rect,
-        ui.interact(
+        // Route map + speed graph, sharing hover and pick.
+        // One block is reserved for both views so the layout below always starts underneath them.
+        let view_h = VIEW_H;
+        let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), view_h), Sense::hover());
+        let gap = 10.0;
+        let map = track.route.is_some().then(|| {
+            let side = view_h.min(row.width() * 0.42);
+            let rect = Rect::from_min_size(row.min, vec2(side, view_h));
+            (
+                rect,
+                ui.interact(rect, ui.id().with("sync_map"), Sense::click_and_drag()),
+            )
+        });
+        let graph_left = map.as_ref().map_or(row.left(), |(r, _)| r.right() + gap);
+        let graph_rect = Rect::from_min_max(pos2(graph_left, row.top()), row.max);
+        let graph = (
             graph_rect,
-            ui.id().with("sync_graph"),
-            Sense::click_and_drag(),
-        ),
-    );
-    if let Some((rect, resp)) = &map {
-        map_navigation(app, ui, &track, *rect, resp);
-    }
-    let map_view = map
-        .as_ref()
-        .and_then(|(r, _)| MapView::new(&track, *r, &app.ui.sync));
-    let graph_view = GraphView::new(&track, graph.0);
+            ui.interact(
+                graph_rect,
+                ui.id().with("sync_graph"),
+                Sense::click_and_drag(),
+            ),
+        );
+        if let Some((rect, resp)) = &map {
+            map_navigation(app, ui, track, *rect, resp);
+        }
+        let map_view = map
+            .as_ref()
+            .and_then(|(r, _)| MapView::new(track, *r, &app.ui.sync));
+        let graph_view = GraphView::new(track, graph.0);
 
-    let mut hover_t = graph.1.hover_pos().map(|p| graph_view.t_of(p.x));
-    if let (Some(mv), Some((_, resp))) = (&map_view, &map)
-        && hover_t.is_none()
-    {
-        hover_t = resp.hover_pos().and_then(|p| mv.nearest_time(&track, p));
-    }
-    // Picking only selects a GPS moment; the offset and playhead change on Sync.
-    if let Some(p) = picked_pos(&graph.1) {
-        app.ui.sync.picked_gps = Some(graph_view.t_of(p.x));
-    }
-    if let (Some(mv), Some((_, resp))) = (&map_view, &map)
-        && let Some(p) = picked_pos(resp)
-        && let Some(t) = mv.nearest_time(&track, p)
-    {
-        app.ui.sync.picked_gps = Some(t);
-    }
-    let video_span = app
-        .state
-        .video
-        .as_ref()
-        .map(|v| (offset, offset + v.duration));
-    let marks = Marks {
-        playhead: gps_now,
-        picked: app.ui.sync.picked_gps,
-        hover: hover_t,
-        video_span,
-    };
-    if let Some(mv) = &map_view {
-        mv.paint(ui, &track, &marks);
-    }
-    graph_view.paint(ui, &track, &marks, units);
-    legend(ui, &track);
-    ui.add_space(4.0);
-    ui.separator();
+        let mut hover_t = graph.1.hover_pos().map(|p| graph_view.t_of(p.x));
+        if let (Some(mv), Some((_, resp))) = (&map_view, &map)
+            && hover_t.is_none()
+        {
+            hover_t = resp.hover_pos().and_then(|p| mv.nearest_time(track, p));
+        }
+        // Picking only selects a GPS moment; the offset and playhead change on Sync.
+        if let Some(p) = picked_pos(&graph.1) {
+            app.ui.sync.picked_gps = Some(graph_view.t_of(p.x));
+        }
+        if let (Some(mv), Some((_, resp))) = (&map_view, &map)
+            && let Some(p) = picked_pos(resp)
+            && let Some(t) = mv.nearest_time(track, p)
+        {
+            app.ui.sync.picked_gps = Some(t);
+        }
+        let video_span = app
+            .state
+            .video
+            .as_ref()
+            .map(|v| (offset, offset + v.duration));
+        let marks = Marks {
+            playhead: gps_now,
+            picked: app.ui.sync.picked_gps,
+            hover: hover_t,
+            video_span,
+        };
+        if let Some(mv) = &map_view {
+            mv.paint(ui, track, &marks);
+        }
+        graph_view.paint(ui, track, &marks, units);
+        ui.add_space(2.0);
+        legend(ui, track);
+    });
+}
 
-    // Sync timestamps and actions, directly under the map and chart.
+/// Video position with step buttons, next to the GPS time and offset it maps to.
+/// The playhead only moves here or on the timeline.
+fn video_card(app: &mut GaugeApp, ui: &mut egui::Ui, track: &Track) {
+    let offset = app.state.project.sync.offset;
+    let units = app.state.project.units;
+    let gps_now = app.state.gps_time();
+    card(ui, |ui| {
+        step_heading(
+            ui,
+            "1",
+            "Find the moment in the video",
+            "Step the video or scrub the timeline until the frame shows a recognizable moment.",
+        );
+        let fd = 1.0 / app.state.fps();
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            step_button(app, ui, "−10s", -10.0, "Move the video back 10 seconds");
+            step_button(app, ui, "−1s", -1.0, "Move the video back 1 second");
+            step_button(app, ui, "◀ frame", -fd, "Move the video back one frame");
+            ui.add_space(6.0);
+            readout(
+                ui,
+                "VIDEO TIME",
+                &format_timecode(app.state.playhead),
+                ui.visuals().text_color(),
+            );
+            ui.add_space(6.0);
+            step_button(app, ui, "frame ▶", fd, "Move the video forward one frame");
+            step_button(app, ui, "+1s", 1.0, "Move the video forward 1 second");
+            step_button(app, ui, "+10s", 10.0, "Move the video forward 10 seconds");
+
+            ui.add_space(24.0);
+            readout(
+                ui,
+                "GPS TIME",
+                &format_wall_time(track.wall_time(gps_now), true),
+                theme::GPS_COLOR,
+            );
+            ui.add_space(18.0);
+            readout(ui, "OFFSET", &format_offset(offset), theme::ACCENT);
+            if let Some(v) = track.value(Metric::Speed, gps_now) {
+                ui.add_space(18.0);
+                readout(
+                    ui,
+                    "SPEED",
+                    &format!(
+                        "{:.1} {}",
+                        to_display(Metric::Speed, v, units),
+                        unit_label(Metric::Speed, units)
+                    ),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+        });
+    });
+}
+
+/// Footer: what Sync will do, and the actions.
+fn footer(app: &mut GaugeApp, ui: &mut egui::Ui, track: &Track) {
     let picked = app.ui.sync.picked_gps;
+    let current = app.state.project.sync.offset;
     ui.horizontal(|ui| {
+        ui.spacing_mut().item_spacing.x = 14.0;
         readout(
             ui,
             "VIDEO TIME",
             &format_timecode(app.state.playhead),
             ui.visuals().text_color(),
         );
-        ui.label(RichText::new("↔").size(BIG));
+        ui.label(RichText::new("↔").size(BIG).weak());
         match picked {
             Some(p) => {
                 readout(
@@ -225,9 +357,18 @@ fn contents(app: &mut GaugeApp, ui: &mut egui::Ui) {
                     &format_wall_time(track.wall_time(p), true),
                     theme::WARN,
                 );
-                ui.add_space(12.0);
+                ui.label(RichText::new("⇒").size(BIG).weak());
                 let new = crate::telemetry::sync::event_offset(app.state.playhead, p);
-                readout(ui, "OFFSET ON SYNC", &format_offset(new), theme::ACCENT);
+                readout(ui, "NEW OFFSET", &format_offset(new), theme::ACCENT);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("CHANGE").small().weak());
+                    ui.label(
+                        RichText::new(format!("{:+.3} s", new - current))
+                            .monospace()
+                            .size(MEDIUM)
+                            .weak(),
+                    );
+                });
             }
             None => readout(
                 ui,
@@ -236,63 +377,80 @@ fn contents(app: &mut GaugeApp, ui: &mut egui::Ui) {
                 ui.visuals().weak_text_color(),
             ),
         }
-    });
-    ui.add_space(6.0);
-    ui.horizontal(|ui| {
-        let sync = egui::Button::new(
-            RichText::new("✔ Sync")
-                .strong()
-                .size(BIG)
-                .color(Color32::WHITE),
-        )
-        .fill(theme::ACCENT)
-        .min_size(vec2(140.0, 38.0));
-        if ui
-            .add(sync)
-            .on_hover_text("Link the picked GPS moment to the current video time, save and close")
-            .clicked()
-        {
-            if let Some(gm) = picked {
-                let vm = app.state.playhead;
-                app.state.undo.break_merge();
-                app.state.execute(Command::SetSyncMarks {
-                    video: Some(vm),
-                    gps: Some(gm),
-                });
-                app.state
-                    .execute(Command::SetOffset(crate::telemetry::sync::event_offset(
-                        vm, gm,
-                    )));
-            }
-            let off = app.state.project.sync.offset;
-            app.toast(
-                ToastKind::Success,
-                format!("Synchronized (offset {})", format_offset(off)),
-            );
-            app.ui.show_sync = false;
-        }
-        ui.add_space(8.0);
-        if ui
-            .add_enabled(
-                picked.is_some(),
-                egui::Button::new(RichText::new("Clear pick").size(MEDIUM))
-                    .min_size(vec2(0.0, 38.0)),
+
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            let sync = egui::Button::new(
+                RichText::new("✔ Sync")
+                    .strong()
+                    .size(BIG)
+                    .color(Color32::WHITE),
             )
-            .clicked()
-        {
-            app.ui.sync.picked_gps = None;
-            app.state.execute(Command::SetSyncMarks {
-                video: None,
-                gps: None,
-            });
-        }
+            .fill(theme::ACCENT)
+            .min_size(vec2(140.0, 36.0));
+            if ui
+                .add(sync)
+                .on_hover_text(
+                    "Link the picked GPS moment to the current video time, save and close",
+                )
+                .clicked()
+            {
+                apply_sync(app, picked);
+            }
+            if ui
+                .add(
+                    egui::Button::new(RichText::new("Cancel").size(MEDIUM))
+                        .min_size(vec2(90.0, 36.0)),
+                )
+                .on_hover_text("Close without changing the offset")
+                .clicked()
+            {
+                app.ui.show_sync = false;
+            }
+            if ui
+                .add_enabled(
+                    picked.is_some(),
+                    egui::Button::new(RichText::new("Clear pick").size(MEDIUM))
+                        .min_size(vec2(90.0, 36.0)),
+                )
+                .clicked()
+            {
+                app.ui.sync.picked_gps = None;
+                app.state.execute(Command::SetSyncMarks {
+                    video: None,
+                    gps: None,
+                });
+            }
+        });
     });
+}
+
+/// Links the picked GPS moment (if any) to the current video time, then closes the window.
+fn apply_sync(app: &mut GaugeApp, picked: Option<f64>) {
+    if let Some(gm) = picked {
+        let vm = app.state.playhead;
+        app.state.undo.break_merge();
+        app.state.execute(Command::SetSyncMarks {
+            video: Some(vm),
+            gps: Some(gm),
+        });
+        app.state
+            .execute(Command::SetOffset(crate::telemetry::sync::event_offset(
+                vm, gm,
+            )));
+    }
+    let off = app.state.project.sync.offset;
+    app.toast(
+        ToastKind::Success,
+        format!("Synchronized (offset {})", format_offset(off)),
+    );
+    app.ui.show_sync = false;
 }
 
 /// Moves the video playhead by `d` seconds.
 fn step_button(app: &mut GaugeApp, ui: &mut egui::Ui, text: &str, d: f64, tip: &str) {
     if ui
-        .add(egui::Button::new(RichText::new(text).size(MEDIUM)).min_size(vec2(36.0, 30.0)))
+        .add(egui::Button::new(RichText::new(text).size(MEDIUM)).min_size(vec2(56.0, 32.0)))
         .on_hover_text(tip)
         .clicked()
     {

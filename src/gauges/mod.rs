@@ -215,8 +215,9 @@ pub fn widest_value_template(g: &Gauge, ctx: &RenderCtx<'_>) -> String {
     let a = format_gauge_value(g, ctx, Some(g.min));
     let b = format_gauge_value(g, ctx, Some(g.max));
     let mut s = if a.len() > b.len() { a } else { b };
-    // Account for an extra digit beyond the configured range.
-    if s.len() < 3 {
+    // Account for an extra digit beyond the configured range; custom fields (gear, RPM) come
+    // with explicit ranges.
+    if s.len() < 3 && g.metric != Metric::Custom {
         s = format!("{}{}", g.style.prefix, "0".repeat(3)) + &g.style.suffix;
     }
     s
@@ -433,6 +434,51 @@ mod tests {
             assert!(!g.zones.is_empty(), "{preset:?}");
             assert!(build_scene(&g, &ctx).prims.len() > 10, "{preset:?}");
         }
+    }
+
+    #[test]
+    fn horizon_and_wind_dials() {
+        let track = test_track();
+        let sync = SyncSettings::default();
+        let ctx = RenderCtx {
+            track: Some(&track),
+            sync: &sync,
+            video_t: 30.0,
+            units: UnitSystem::Metric,
+        };
+        let horizon = make_preset(
+            PresetId::AttitudeIndicator,
+            model::GaugeId(1),
+            (1920.0, 1080.0),
+            Some(&track),
+            UnitSystem::Metric,
+        );
+        // Without pitch/roll fields the attitude comes from GPS: the test track climbs, so the
+        // nose is up, and it circles, so it banks.
+        let (pitch, roll) = analog::attitude(&horizon, &ctx).unwrap();
+        assert!(pitch > 0.0, "{pitch}");
+        assert!(roll.abs() > 0.1 && roll.abs() <= 60.0, "{roll}");
+        assert!(build_scene(&horizon, &ctx).prims.len() > 20);
+
+        let wind = make_preset(
+            PresetId::WindDial,
+            model::GaugeId(2),
+            (1920.0, 1080.0),
+            Some(&track),
+            UnitSystem::Metric,
+        );
+        assert_eq!(wind.metric, Metric::Custom);
+        assert_eq!(wind.custom_key, "wind_direction");
+        // No wind fields: the rose still draws, with "--" for the speed.
+        let texts: Vec<String> = build_scene(&wind, &ctx)
+            .prims
+            .iter()
+            .filter_map(|p| match p {
+                scene::Prim::Text(t) => Some(t.text.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(texts.iter().any(|t| t == "--"), "{texts:?}");
     }
 
     #[test]
